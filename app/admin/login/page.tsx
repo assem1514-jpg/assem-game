@@ -3,23 +3,17 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  signInWithPopup,
-  signOut,
-} from "firebase/auth";
+import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { isAdminEmail } from "@/lib/admin";
 
 export default function AdminLoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
-  // إذا الأدمن مسجل دخول مسبقاً: دخله للداش بورد
+  // إذا أي مستخدم مسجل دخول مسبقاً: دخله للداش بورد
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
-      if (isAdminEmail(user?.email)) router.replace("/admin");
+      if (user) router.replace("/admin");
     });
     return () => unsub();
   }, [router]);
@@ -28,17 +22,10 @@ export default function AdminLoginPage() {
     setLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      const res = await signInWithPopup(auth, provider);
-
-      if (!isAdminEmail(res.user.email)) {
-        await signOut(auth);
-        alert("هذا الحساب ليس أدمن.");
-        return;
-      }
-
+      await signInWithPopup(auth, provider);
       router.replace("/admin");
     } catch (e: any) {
-      alert(e?.message || "حدث خطأ في تسجيل دخول الأدمن");
+      alert(e?.message || "حدث خطأ في تسجيل الدخول");
     } finally {
       setLoading(false);
     }
@@ -57,7 +44,7 @@ export default function AdminLoginPage() {
       >
         <h1 style={{ margin: 0, fontSize: 30 }}>لوحة الأدمن</h1>
         <p style={{ opacity: 0.7, marginTop: 8 }}>
-          هذه الصفحة خاصة بالأدمن فقط
+          سجّل دخول عبر Google للمتابعة
         </p>
 
         <button
@@ -75,7 +62,7 @@ export default function AdminLoginPage() {
             cursor: loading ? "not-allowed" : "pointer",
           }}
         >
-          {loading ? "جارٍ تسجيل الدخول..." : "تسجيل دخول الأدمن عبر Google"}
+          {loading ? "جارٍ تسجيل الدخول..." : "تسجيل دخول عبر Google"}
         </button>
       </div>
     </div>
