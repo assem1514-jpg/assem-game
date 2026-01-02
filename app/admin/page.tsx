@@ -1,3 +1,4 @@
+// app/admin/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -17,8 +18,7 @@ import {
   setDoc,
 } from "firebase/firestore";
 
-import { onAuthStateChanged, signOut, User } from "firebase/auth";
-import { auth, db } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 
 type AdminTab = "categories" | "questions" | "users" | "marketing";
 
@@ -87,36 +87,8 @@ export default function AdminPage() {
   }, []);
 
   // -----------------------------
-  // ✅ Auth guard (بدون تصريح: أي شخص مسجل دخول مسموح)
+  // ✅ بدون تصريح نهائياً: لا تسجيل دخول ولا تحقق
   // -----------------------------
-  const [authLoading, setAuthLoading] = useState(true);
-  const [me, setMe] = useState<User | null>(null);
-  const [notAllowed, setNotAllowed] = useState(false);
-
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setMe(u ?? null);
-      setAuthLoading(false);
-    });
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    if (authLoading) return;
-
-    if (!me) {
-      router.replace("/admin/login");
-      return;
-    }
-
-    // ✅ إلغاء التحقق من الأدمن: أي مستخدم مسجّل دخول يعتبر مسموح
-    setNotAllowed(false);
-  }, [authLoading, me, router]);
-
-  async function handleLogout() {
-    await signOut(auth);
-    router.replace("/admin/login");
-  }
 
   // -----------------------------
   // UI State
@@ -489,36 +461,6 @@ export default function AdminPage() {
     await deleteDoc(doc(db, "promoCodes", p.id));
   }
 
-  // -----------------------------
-  // Render helpers
-  // -----------------------------
-  if (authLoading) {
-    return (
-      <div className={styles.centerPage}>
-        <div className={styles.loadingBox}>جاري التحقق من الدخول…</div>
-      </div>
-    );
-  }
-
-  if (notAllowed) {
-    return (
-      <div className={styles.centerPage}>
-        <div className={styles.card}>
-          <h2 className={styles.h2}>غير مصرح</h2>
-          <p className={styles.muted}>تم تعطيل التصاريح. إذا شفت هذه الصفحة بلغني.</p>
-          <div className={styles.row}>
-            <button className={styles.btn} onClick={handleLogout}>
-              تسجيل خروج
-            </button>
-            <button className={styles.primaryBtn} onClick={() => router.replace("/admin/login")}>
-              صفحة تسجيل الأدمن
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className={styles.layout}>
       {/* Sidebar */}
@@ -561,11 +503,8 @@ export default function AdminPage() {
         <div className={styles.sidebarFooter}>
           <div className={styles.meLine}>
             <span className={styles.dot} />
-            <span className={styles.meEmail}>{me?.email}</span>
+            <span className={styles.meEmail}>ضيف</span>
           </div>
-          <button className={styles.btn} onClick={handleLogout}>
-            تسجيل خروج
-          </button>
         </div>
       </aside>
 
@@ -712,11 +651,7 @@ export default function AdminPage() {
                     </div>
                     <div className={styles.field}>
                       <label className={styles.label}>رابط الصورة</label>
-                      <input
-                        className={styles.input}
-                        value={editCatImageUrl}
-                        onChange={(e) => setEditCatImageUrl(e.target.value)}
-                      />
+                      <input className={styles.input} value={editCatImageUrl} onChange={(e) => setEditCatImageUrl(e.target.value)} />
                     </div>
                   </div>
 
