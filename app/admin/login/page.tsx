@@ -10,7 +10,7 @@ export default function AdminLoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
-  // إذا أي مستخدم مسجل دخول مسبقاً: دخله للداش بورد
+  // أي مستخدم مسجل دخول: دخله للداش بورد
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user) router.replace("/admin");
@@ -18,7 +18,7 @@ export default function AdminLoginPage() {
     return () => unsub();
   }, [router]);
 
-  async function handleAdminGoogleLogin() {
+  async function handleGoogleLogin() {
     setLoading(true);
     try {
       const provider = new GoogleAuthProvider();
@@ -48,7 +48,7 @@ export default function AdminLoginPage() {
         </p>
 
         <button
-          onClick={handleAdminGoogleLogin}
+          onClick={handleGoogleLogin}
           disabled={loading}
           style={{
             marginTop: 14,

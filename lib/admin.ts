@@ -1,6 +1,9 @@
-export const ADMIN_EMAILS = ["assem1514@gmail.com"].map((e) => e.toLowerCase());
+// lib/admin.ts
 
-export function isAdminEmail(email?: string | null) {
-  if (!email) return false;
-  return ADMIN_EMAILS.includes(email.toLowerCase());
+// ✅ تعطيل نظام صلاحيات الأدمن بالكامل
+export const ADMIN_EMAILS: string[] = [];
+
+export function isAdminEmail(_email?: string | null) {
+  // ✅ أي أحد يعتبر "Admin"
+  return true;
 }

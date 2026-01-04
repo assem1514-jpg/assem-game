@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import styles from "./page.module.css";
 
 import { db } from "@/lib/firebase";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 
 type Team = { name: string; score: number };
 
@@ -48,6 +48,8 @@ export default function QuestionPage() {
 
   const catId = sp.get("cat") || "";
   const pts = Number(sp.get("pts") || 0);
+  const idx = Number(sp.get("idx") || 0); // ✅ جديد
+  const qid = sp.get("qid") || "";
   const catsParam = normalizeCatsParam(sp.get("cats") || "");
 
   const [game, setGame] = useState(() => loadGame());
@@ -56,8 +58,6 @@ export default function QuestionPage() {
   const [loading, setLoading] = useState(true);
   const [question, setQuestion] = useState<QuestionDoc | null>(null);
 
-  // ✅ جلب السؤال الحقيقي من Firestore: packs/main/categories/{catId}/questions
-  // ✅ نطابق النقاط باستخدام Number() عشان لو النقاط محفوظة كنص "100" ما تخرب
   useEffect(() => {
     let cancelled = false;
 
@@ -70,27 +70,42 @@ export default function QuestionPage() {
 
       setLoading(true);
       try {
-        const snap = await getDocs(
-          collection(db, "packs", "main", "categories", catId, "questions")
-        );
-
         let found: QuestionDoc | null = null;
 
-        snap.forEach((d) => {
-          if (found) return;
-          const data = d.data() as any;
+        if (qid) {
+          const ref = doc(db, "packs", "main", "categories", catId, "questions", qid);
+          const snap = await getDoc(ref);
+          if (snap.exists()) {
+            const data = snap.data() as any;
+            const p = Number(data.points ?? 0);
 
-          const p = Number(data.points ?? 0);
-          if (p !== pts) return;
+            found = {
+              text: data.text ?? "",
+              points: p || pts,
+              imageUrl: data.imageUrl ?? "",
+              answerText: data.answerText ?? "",
+              answerImageUrl: data.answerImageUrl ?? "",
+            };
+          }
+        }
 
-          found = {
-            text: data.text ?? "",
-            points: p,
-            imageUrl: data.imageUrl ?? "",
-            answerText: data.answerText ?? "",
-            answerImageUrl: data.answerImageUrl ?? "",
-          };
-        });
+        if (!found) {
+          const snap = await getDocs(collection(db, "packs", "main", "categories", catId, "questions"));
+          snap.forEach((d) => {
+            if (found) return;
+            const data = d.data() as any;
+            const p = Number(data.points ?? 0);
+            if (p !== pts) return;
+
+            found = {
+              text: data.text ?? "",
+              points: p,
+              imageUrl: data.imageUrl ?? "",
+              answerText: data.answerText ?? "",
+              answerImageUrl: data.answerImageUrl ?? "",
+            };
+          });
+        }
 
         if (!cancelled) {
           setQuestion(found);
@@ -108,21 +123,29 @@ export default function QuestionPage() {
     return () => {
       cancelled = true;
     };
-  }, [catId, pts]);
+  }, [catId, pts, qid]);
+
+  const catTitle = useMemo(() => catId || "فئة", [catId]);
 
   function backToBoard() {
     router.push(`/game?cats=${encodeURIComponent(catsParam)}`);
   }
 
-  function markUsedAndBack(updatedGame: any) {
+  function markUsed(updatedGame: any, advanceTurn: boolean) {
     updatedGame.used = updatedGame.used || {};
-    updatedGame.used[`${catId}:${pts}`] = true;
+    updatedGame.used[`${catId}:${pts}:${idx}`] = true; // ✅ مهم
 
-    const n = updatedGame.teams?.length || 0;
-    if (n > 0) updatedGame.turnIndex = ((updatedGame.turnIndex ?? 0) + 1) % n;
+    if (advanceTurn) {
+      const n = updatedGame.teams?.length || 0;
+      if (n > 0) updatedGame.turnIndex = ((updatedGame.turnIndex ?? 0) + 1) % n;
+    }
 
     saveGame(updatedGame);
     setGame(updatedGame);
+  }
+
+  function markUsedAndBack(updatedGame: any) {
+    markUsed(updatedGame, true);
     backToBoard();
   }
 
@@ -141,6 +164,16 @@ export default function QuestionPage() {
     markUsedAndBack(updated);
   }
 
+  function backSmart() {
+    if (!game) return backToBoard();
+    if (showAnswer && question) {
+      const updated = { ...game };
+      markUsedAndBack(updated);
+      return;
+    }
+    backToBoard();
+  }
+
   if (!game) {
     return (
       <div className={styles.page} style={{ padding: 24 }}>
@@ -153,16 +186,15 @@ export default function QuestionPage() {
     <div className={styles.page}>
       <header className={styles.topBar}>
         <div className={styles.left}>
-          <button className={styles.btn} onClick={backToBoard} type="button">
+          <button className={styles.btn} onClick={backSmart} type="button">
             الرجوع للوحة
           </button>
         </div>
 
-        <div className={styles.center}>سؤال</div>
+        <div className={styles.center}>{showAnswer ? "الجواب" : "سؤال"}</div>
 
         <div className={styles.rightPill}>
-          {/* كان يعرض catId (كود) — خليه اسم مؤقت: */}
-          <span>{catId || "فئة"}</span>
+          <span>{catTitle}</span>
           <b>{pts} نقطة</b>
         </div>
       </header>
@@ -170,59 +202,61 @@ export default function QuestionPage() {
       <main className={styles.layout}>
         <section className={styles.card}>
           {loading ? (
-            <div className={styles.qTitle}>جاري تحميل السؤال…</div>
+            <div className={styles.qTitle}>جاري التحميل…</div>
           ) : !question ? (
-            <div className={styles.qTitle}>
-              ما فيه سؤال بهذه النقاط داخل هذه الفئة. (تأكد أن النقاط مطابقة)
-            </div>
+            <div className={styles.qTitle}>ما فيه سؤال بهذه النقاط داخل هذه الفئة.</div>
           ) : (
             <>
-              <div className={styles.qTitle}>{question.text}</div>
+              {!showAnswer ? (
+                <>
+                  <div className={styles.qTitle}>{question.text}</div>
 
-              {question.imageUrl ? (
-                <div className={styles.media}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={question.imageUrl} alt="question" />
-                </div>
-              ) : null}
-
-              <div className={styles.bottomRow}>
-                {!showAnswer ? (
-                  <button
-                    className={styles.answerBtn}
-                    onClick={() => setShowAnswer(true)}
-                    type="button"
-                  >
-                    أظهر الجواب
-                  </button>
-                ) : (
-                  <div className={styles.answerBox}>
-                    <div className={styles.answerLabel}>الإجابة:</div>
-                    <div className={styles.answerText}>
-                      {question.answerText || "—"}
+                  {question.imageUrl ? (
+                    <div className={styles.media}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={question.imageUrl} alt="question" />
                     </div>
+                  ) : null}
 
-                    {question.answerImageUrl ? (
-                      <div style={{ marginTop: 10 }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={question.answerImageUrl}
-                          alt="answer"
-                          style={{ width: "100%", borderRadius: 12 }}
-                        />
-                      </div>
-                    ) : null}
+                  <div className={styles.bottomRow}>
+                    <button
+                      className={styles.answerBtn}
+                      onClick={() => {
+                        setShowAnswer(true);
+                        const updated = { ...game };
+                        markUsed(updated, false); // تقفل الخلية مباشرة
+                      }}
+                      type="button"
+                    >
+                      أظهر الجواب
+                    </button>
+
+                    <button className={styles.backBtn} onClick={backSmart} type="button">
+                      الرجوع للوحة
+                    </button>
                   </div>
-                )}
+                </>
+              ) : (
+                <>
+                  {/* ✅ بعد الجواب: نص + صورة الجواب فقط (بدون صورة السؤال) */}
+                  <div className={styles.qTitle} style={{ fontSize: 22 }}>
+                    {question.answerText || "—"}
+                  </div>
 
-                <button
-                  className={styles.backBtn}
-                  onClick={backToBoard}
-                  type="button"
-                >
-                  الرجوع للوحة
-                </button>
-              </div>
+                  {question.answerImageUrl ? (
+                    <div className={styles.media}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={question.answerImageUrl} alt="answer" />
+                    </div>
+                  ) : null}
+
+                  <div className={styles.bottomRow}>
+                    <button className={styles.backBtn} onClick={backSmart} type="button">
+                      الرجوع للوحة
+                    </button>
+                  </div>
+                </>
+              )}
             </>
           )}
         </section>
@@ -249,7 +283,8 @@ export default function QuestionPage() {
             className={styles.nobodyBtn}
             onClick={nobodyAnswered}
             type="button"
-            disabled={!question}
+            disabled={!question || !showAnswer}
+            title={!showAnswer ? "اظهر الجواب أولًا" : ""}
           >
             محد جاوب
           </button>

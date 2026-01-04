@@ -13,6 +13,9 @@ type CatMeta = { id: string; name: string; imageUrl?: string };
 
 const LS_KEY = "assem_game_v1";
 
+// ✅ 6 خلايا: 2x600 ثم 2x400 ثم 2x200 (من فوق لتحت)
+const POINTS_ROWS: number[] = [600, 600, 400, 400, 200, 200];
+
 function loadGame() {
   if (typeof window === "undefined") return null;
   try {
@@ -41,16 +44,34 @@ export default function GameBoardClient() {
   const sp = useSearchParams();
 
   const rawCats = normalizeCatsParam(sp.get("cats") || "");
-  const catIds = useMemo(
-    () => rawCats.split(",").map((x) => x.trim()).filter(Boolean),
-    [rawCats]
-  );
+
+  // ✅ إزالة أي تكرار في catIds (عشان ما تتكرر أعمدة)
+  const catIds = useMemo(() => {
+    const arr = rawCats
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    for (const id of arr) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        unique.push(id);
+      }
+    }
+    return unique;
+  }, [rawCats]);
 
   const [game, setGame] = useState(() => loadGame());
   const [catsMeta, setCatsMeta] = useState<Record<string, CatMeta>>({});
-  const [pointsRows, setPointsRows] = useState<number[]>([600, 500, 400, 300, 200, 100]);
 
-  // ✅ جلب ميتا الفئات (الاسم + الصورة) من نفس مكان الأدمن (مع fallback)
+  // ✅ هل توجد خلية فعلاً؟ + ربط كل خلية بـ questionId ثابت
+  // (مفتاح الخلية صار فيه idx عشان يكون عندنا خلية أولى وثانية لنفس النقاط)
+  const [hasQuestion, setHasQuestion] = useState<Record<string, boolean>>({});
+  const [qidByCell, setQidByCell] = useState<Record<string, string>>({});
+
+  // ✅ جلب ميتا الفئات (الاسم + الصورة)
   useEffect(() => {
     let cancelled = false;
 
@@ -74,7 +95,6 @@ export default function GameBoardClient() {
       };
 
       try {
-        // 1) جرّب مسار الأدمن غالبًا: packs/main/categories
         const q1 = query(
           collection(db, "packs", "main", "categories"),
           where(documentId(), "in", catIds.slice(0, 10))
@@ -82,7 +102,6 @@ export default function GameBoardClient() {
         const snap1 = await getDocs(q1);
         let map = buildMap(snap1);
 
-        // 2) لو في فئات ناقصة جرّب المسار الثاني: /categories
         const missing = catIds.filter((id) => !map[id]);
         if (missing.length) {
           const q2 = query(
@@ -105,53 +124,64 @@ export default function GameBoardClient() {
     };
   }, [catIds.join("|")]);
 
-  // ✅ بناء صفوف النقاط من الأسئلة الحقيقية (6 صفوف) من: packs/main/categories/{catId}/questions
-  const [hasQuestion, setHasQuestion] = useState<Record<string, boolean>>({});
+  // ✅ بناء hasQuestion + qidByCell من الأسئلة الحقيقية
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       if (!catIds.length) {
         setHasQuestion({});
-        setPointsRows([600, 500, 400, 300, 200, 100]);
+        setQidByCell({});
         return;
       }
 
       try {
-        const map: Record<string, boolean> = {};
-        const pointsSet = new Set<number>();
+        const hasMap: Record<string, boolean> = {};
+        const idMap: Record<string, string> = {};
 
         for (const catId of catIds) {
           const snap = await getDocs(
             collection(db, "packs", "main", "categories", catId, "questions")
           );
 
+          // نجمع المرشحين لكل نقاط
+          const bucket: Record<number, string[]> = { 200: [], 400: [], 600: [] };
+
           snap.forEach((d) => {
             const data = d.data() as any;
             const pts = Number(data.points || 0);
-            if (pts > 0) {
-              pointsSet.add(pts);
-              map[`${catId}:${pts}`] = true;
-            }
+            if (![200, 400, 600].includes(pts)) return;
+            bucket[pts].push(d.id);
           });
+
+          // ✅ نخلي الاختيار ثابت: ترتيب id تصاعدي
+          for (const pts of [200, 400, 600] as const) {
+            const ids = (bucket[pts] || []).slice().sort();
+
+            // الخلية الأولى
+            if (ids[0]) {
+              const key0 = `${catId}:${pts}:0`;
+              hasMap[key0] = true;
+              idMap[key0] = ids[0];
+            }
+            // الخلية الثانية
+            if (ids[1]) {
+              const key1 = `${catId}:${pts}:1`;
+              hasMap[key1] = true;
+              idMap[key1] = ids[1];
+            }
+          }
         }
 
-        const sorted = Array.from(pointsSet).sort((a, b) => b - a);
-
-        const fallback = [600, 500, 400, 300, 200, 100];
-        for (const f of fallback) if (!sorted.includes(f)) sorted.push(f);
-
-        const finalRows = sorted.slice(0, 6);
-
         if (!cancelled) {
-          setHasQuestion(map);
-          setPointsRows(finalRows);
+          setHasQuestion(hasMap);
+          setQidByCell(idMap);
         }
       } catch (e) {
         console.error(e);
         if (!cancelled) {
           setHasQuestion({});
-          setPointsRows([600, 500, 400, 300, 200, 100]);
+          setQidByCell({});
         }
       }
     })();
@@ -161,20 +191,25 @@ export default function GameBoardClient() {
     };
   }, [catIds.join("|")]);
 
-  function isUsed(catId: string, pts: number) {
-    return !!game?.used?.[`${catId}:${pts}`];
+  // ✅ idx = 0 أو 1 (أي خلية من الثنتين)
+  function isUsed(catId: string, pts: number, idx: number) {
+    return !!game?.used?.[`${catId}:${pts}:${idx}`];
   }
 
-  function canOpen(catId: string, pts: number) {
-    return !!hasQuestion[`${catId}:${pts}`];
+  function canOpen(catId: string, pts: number, idx: number) {
+    return !!hasQuestion[`${catId}:${pts}:${idx}`];
   }
 
-  function openQuestion(catId: string, pts: number) {
+  function openQuestion(catId: string, pts: number, idx: number) {
     if (!game) return;
+
+    const key = `${catId}:${pts}:${idx}`;
+    const qid = qidByCell[key] || "";
+
     router.push(
-      `/game/question?cat=${encodeURIComponent(catId)}&pts=${pts}&cats=${encodeURIComponent(
-        catIds.join(",")
-      )}`
+      `/game/question?cat=${encodeURIComponent(catId)}&pts=${pts}&idx=${idx}&qid=${encodeURIComponent(
+        qid
+      )}&cats=${encodeURIComponent(catIds.join(","))}`
     );
   }
 
@@ -241,37 +276,56 @@ export default function GameBoardClient() {
             const title = meta?.name || catId;
 
             return (
-              <div
-                key={catId}
-                className={styles.catHeader}
-                style={
-                  meta?.imageUrl
-                    ? {
-                        backgroundImage: `linear-gradient(180deg, rgba(0,0,0,.25), rgba(0,0,0,.55)), url(${meta.imageUrl})`,
-                        backgroundSize: "cover",
-                        backgroundPosition: "center",
-                      }
-                    : undefined
-                }
-              >
-                <div className={styles.catName}>{title}</div>
+              <div key={catId} className={styles.catHeader} style={{ backgroundImage: "none" as any }}>
+                <div className={styles.catName} style={{ marginBottom: 8 }}>
+                  {title}
+                </div>
+
+                {meta?.imageUrl?.trim() ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={meta.imageUrl.trim()}
+                    alt={title}
+                    style={{
+                      width: "100%",
+                      height: 92,
+                      objectFit: "cover",
+                      borderRadius: 14,
+                      border: "1px solid rgba(255,255,255,.20)",
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: "100%",
+                      height: 92,
+                      borderRadius: 14,
+                      background: "rgba(255,255,255,.10)",
+                      border: "1px solid rgba(255,255,255,.14)",
+                    }}
+                  />
+                )}
               </div>
             );
           })}
 
-          {pointsRows.map((pts) =>
+          {/* ✅ 6 صفوف */}
+          {POINTS_ROWS.map((pts, rowIndex) =>
             catIds.map((catId) => {
-              const used = isUsed(catId, pts);
-              const enabled = canOpen(catId, pts) && !used;
+              // كل نقطتين لها idx: 0 ثم 1
+              const idx = rowIndex % 2;
+
+              const used = isUsed(catId, pts, idx);
+              const enabled = canOpen(catId, pts, idx) && !used;
 
               return (
                 <button
-                  key={`${catId}-${pts}`}
+                  key={`${catId}-${pts}-${idx}-${rowIndex}`}
                   className={`${styles.cell} ${used ? styles.used : ""}`}
-                  onClick={() => enabled && openQuestion(catId, pts)}
+                  onClick={() => enabled && openQuestion(catId, pts, idx)}
                   type="button"
                   disabled={!enabled}
-                  title={!canOpen(catId, pts) ? "ما فيه سؤال بهذه النقاط" : ""}
+                  title={!canOpen(catId, pts, idx) ? "ما فيه سؤال بهذه النقاط" : ""}
                 >
                   {pts}
                 </button>
