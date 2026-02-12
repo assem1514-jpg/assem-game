@@ -6,38 +6,33 @@ import styles from "./admin.module.css";
 import { useRouter } from "next/navigation";
 
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
+  increment,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
-  updateDoc,
   setDoc,
+  updateDoc,
 } from "firebase/firestore";
-
 import { db } from "@/lib/firebase";
 
-type AdminTab = "categories" | "questions" | "users" | "marketing";
+import CategoriesTab from "./CategoriesTab";
+import QuestionsTab from "./QuestionsTab";
 
-type Category = {
+type AdminTab = "categories" | "questions" | "users" | "marketing" | "letters";
+
+export type Category = {
   id: string;
   name: string;
   imageUrl?: string;
-  order?: number;
-  createdAt?: any;
-  updatedAt?: any;
-};
+  videoUrl?: string;
+  description?: string;
 
-type Question = {
-  id: string;
-  text: string;
-  points: number;
-  imageUrl?: string;
-  answerText?: string;
-  answerImageUrl?: string;
+  // ✅ تصنيف الفئة (عام/رياضة/موسيقى...)
+  group?: string;
+
   createdAt?: any;
   updatedAt?: any;
 };
@@ -50,6 +45,9 @@ type AppUser = {
   provider?: string;
   createdAt?: any;
   lastLoginAt?: any;
+
+  // ✅ رصيد اللعب
+  credits?: number;
 };
 
 type PromoCode = {
@@ -60,16 +58,55 @@ type PromoCode = {
   usedCount?: number;
   active?: boolean;
   createdAt?: any;
+  updatedAt?: any;
 };
+
+// ✅ لعبة الحروف (مستقلة)
+type LetterDoc = {
+  id: string; // نفس الحرف
+  letter: string;
+  question: string;
+  answer: string;
+  createdAt?: any;
+  updatedAt?: any;
+};
+
+const AR_LETTERS = [
+  "ا",
+  "ب",
+  "ت",
+  "ث",
+  "ج",
+  "ح",
+  "خ",
+  "د",
+  "ذ",
+  "ر",
+  "ز",
+  "س",
+  "ش",
+  "ص",
+  "ض",
+  "ط",
+  "ظ",
+  "ع",
+  "غ",
+  "ف",
+  "ق",
+  "ك",
+  "ل",
+  "م",
+  "ن",
+  "هـ",
+  "و",
+  "ي",
+];
 
 export default function AdminPage() {
   const router = useRouter();
 
-  // -----------------------------
-  // ✅ Active Pack (يحدد وين نخزن الفئات/الأسئلة)
-  // -----------------------------
+  // ✅ Active Pack
   const [activePackId, setActivePackId] = useState<string>("main");
-
   useEffect(() => {
     const cfgRef = doc(db, "appConfig", "main");
     const unsub = onSnapshot(
@@ -86,40 +123,18 @@ export default function AdminPage() {
     return () => unsub();
   }, []);
 
-  // -----------------------------
-  // ✅ بدون تصريح نهائياً: لا تسجيل دخول ولا تحقق
-  // -----------------------------
-
-  // -----------------------------
-  // UI State
-  // -----------------------------
+  // UI
   const [tab, setTab] = useState<AdminTab>("categories");
 
-  // -----------------------------
-  // Categories (CRUD) داخل packs/{activePackId}/categories
-  // -----------------------------
+  // ✅ Categories subscription (مشترك بين التابين)
   const [categories, setCategories] = useState<Category[]>([]);
   const [catsLoading, setCatsLoading] = useState(true);
-
-  const [catName, setCatName] = useState("");
-  const [catOrder, setCatOrder] = useState<number>(1);
-  const [catImageUrl, setCatImageUrl] = useState("");
-
-  const [editingCatId, setEditingCatId] = useState<string | null>(null);
-  const editingCat = useMemo(
-    () => categories.find((c) => c.id === editingCatId) || null,
-    [categories, editingCatId]
-  );
-
-  const [editCatName, setEditCatName] = useState("");
-  const [editCatOrder, setEditCatOrder] = useState<number>(1);
-  const [editCatImageUrl, setEditCatImageUrl] = useState("");
 
   useEffect(() => {
     setCatsLoading(true);
 
     const colRef = collection(db, "packs", activePackId, "categories");
-    const qCats = query(colRef, orderBy("order", "asc"));
+    const qCats = query(colRef);
 
     const unsub = onSnapshot(
       qCats,
@@ -130,16 +145,18 @@ export default function AdminPage() {
             id: d.id,
             name: data.name ?? "",
             imageUrl: data.imageUrl ?? "",
-            order: data.order ?? 0,
+            videoUrl: data.videoUrl ?? "",
+            description: data.description ?? "",
+            group: data.group ?? data.categoryGroup ?? "",
             createdAt: data.createdAt ?? null,
             updatedAt: data.updatedAt ?? null,
           };
         });
+
+        // ترتيب بالاسم
+        list.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
         setCategories(list);
         setCatsLoading(false);
-
-        const maxOrder = list.reduce((m, x) => Math.max(m, Number(x.order || 0)), 0);
-        setCatOrder((prev) => (prev <= maxOrder ? maxOrder + 1 : prev));
       },
       (err) => {
         console.error(err);
@@ -151,213 +168,18 @@ export default function AdminPage() {
     return () => unsub();
   }, [activePackId]);
 
-  async function addCategory() {
-    const name = catName.trim();
-    if (!name) return alert("اكتب اسم الفئة");
-
-    await addDoc(collection(db, "packs", activePackId, "categories"), {
-      name,
-      order: Number(catOrder) || 1,
-      imageUrl: catImageUrl.trim() || "",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    setCatName("");
-    setCatImageUrl("");
-    setCatOrder((v) => v + 1);
-  }
-
-  function startEditCategory(c: Category) {
-    setEditingCatId(c.id);
-    setEditCatName(c.name);
-    setEditCatOrder(Number(c.order || 1));
-    setEditCatImageUrl(c.imageUrl || "");
-  }
-
-  async function saveEditCategory() {
-    if (!editingCatId) return;
-
-    const name = editCatName.trim();
-    if (!name) return alert("اسم الفئة مطلوب");
-
-    await updateDoc(doc(db, "packs", activePackId, "categories", editingCatId), {
-      name,
-      order: Number(editCatOrder) || 1,
-      imageUrl: editCatImageUrl.trim() || "",
-      updatedAt: serverTimestamp(),
-    });
-
-    setEditingCatId(null);
-  }
-
-  async function removeCategory(catId: string) {
-    const ok = confirm(
-      "حذف الفئة سيخفيها من واجهة اللاعب. (لن نحذف أسئلتها الفرعية تلقائياً الآن). هل أنت متأكد؟"
-    );
-    if (!ok) return;
-
-    await deleteDoc(doc(db, "packs", activePackId, "categories", catId));
-  }
-
   // -----------------------------
-  // Questions (CRUD) تحت كل فئة
-  // packs/{activePackId}/categories/{catId}/questions
-  // -----------------------------
-  const [selectedCatId, setSelectedCatId] = useState<string>("");
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [qsLoading, setQsLoading] = useState(false);
-
-  // add question
-  const [qText, setQText] = useState("");
-  const [qPoints, setQPoints] = useState<number>(100);
-  const [qImageUrl, setQImageUrl] = useState("");
-  const [aText, setAText] = useState("");
-  const [aImageUrl, setAImageUrl] = useState("");
-
-  // edit question
-  const [editingQId, setEditingQId] = useState<string | null>(null);
-  const editingQ = useMemo(
-    () => questions.find((q) => q.id === editingQId) || null,
-    [questions, editingQId]
-  );
-
-  const [editQText, setEditQText] = useState("");
-  const [editQPoints, setEditQPoints] = useState<number>(100);
-  const [editQImageUrl, setEditQImageUrl] = useState("");
-  const [editAText, setEditAText] = useState("");
-  const [editAImageUrl, setEditAImageUrl] = useState("");
-
-  // auto select first category
-  useEffect(() => {
-    if (!selectedCatId && categories.length) {
-      setSelectedCatId(categories[0].id);
-    }
-  }, [categories, selectedCatId]);
-
-  // لو تغير الـ pack، نظف اختيار الفئة والأسئلة
-  useEffect(() => {
-    setSelectedCatId("");
-    setQuestions([]);
-    setEditingQId(null);
-  }, [activePackId]);
-
-  // live subscribe questions for selected category
-  useEffect(() => {
-    setQuestions([]);
-    setEditingQId(null);
-
-    if (!selectedCatId) return;
-
-    setQsLoading(true);
-    const colRef = collection(db, "packs", activePackId, "categories", selectedCatId, "questions");
-    const qRef = query(colRef, orderBy("points", "desc"));
-
-    const unsub = onSnapshot(
-      qRef,
-      (snap) => {
-        const list: Question[] = snap.docs.map((d) => {
-          const data = d.data() as any;
-          return {
-            id: d.id,
-            text: data.text ?? "",
-            points: Number(data.points ?? 100),
-            imageUrl: data.imageUrl ?? "",
-            answerText: data.answerText ?? "",
-            answerImageUrl: data.answerImageUrl ?? "",
-            createdAt: data.createdAt ?? null,
-            updatedAt: data.updatedAt ?? null,
-          };
-        });
-        setQuestions(list);
-        setQsLoading(false);
-      },
-      (err) => {
-        console.error(err);
-        setQuestions([]);
-        setQsLoading(false);
-      }
-    );
-
-    return () => unsub();
-  }, [activePackId, selectedCatId]);
-
-  async function addQuestion() {
-    if (!selectedCatId) return alert("اختر فئة أولًا");
-
-    const text = qText.trim();
-    const ans = aText.trim();
-
-    if (!text) return alert("اكتب نص السؤال");
-    if (!ans) return alert("اكتب الإجابة");
-
-    await addDoc(collection(db, "packs", activePackId, "categories", selectedCatId, "questions"), {
-      text,
-      points: Number(qPoints) || 100,
-      imageUrl: qImageUrl.trim() || "",
-      answerText: ans,
-      answerImageUrl: aImageUrl.trim() || "",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    setQText("");
-    setQPoints(100);
-    setQImageUrl("");
-    setAText("");
-    setAImageUrl("");
-  }
-
-  function startEditQuestion(q: Question) {
-    setEditingQId(q.id);
-    setEditQText(q.text);
-    setEditQPoints(q.points);
-    setEditQImageUrl(q.imageUrl || "");
-    setEditAText(q.answerText || "");
-    setEditAImageUrl(q.answerImageUrl || "");
-  }
-
-  async function saveEditQuestion() {
-    if (!selectedCatId || !editingQId) return;
-
-    const text = editQText.trim();
-    const ans = editAText.trim();
-
-    if (!text) return alert("نص السؤال مطلوب");
-    if (!ans) return alert("الإجابة مطلوبة");
-
-    await updateDoc(
-      doc(db, "packs", activePackId, "categories", selectedCatId, "questions", editingQId),
-      {
-        text,
-        points: Number(editQPoints) || 100,
-        imageUrl: editQImageUrl.trim() || "",
-        answerText: ans,
-        answerImageUrl: editAImageUrl.trim() || "",
-        updatedAt: serverTimestamp(),
-      }
-    );
-
-    setEditingQId(null);
-  }
-
-  async function removeQuestion(qId: string) {
-    if (!selectedCatId) return;
-    const ok = confirm("متأكد تبغى تحذف السؤال؟");
-    if (!ok) return;
-
-    await deleteDoc(doc(db, "packs", activePackId, "categories", selectedCatId, "questions", qId));
-  }
-
-  // -----------------------------
-  // Users (list)
+  // Users (list + charge credits)
   // -----------------------------
   const [users, setUsers] = useState<AppUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
 
+  // لكل مستخدم: قيمة الشحن اللي كاتبها الأدمن
+  const [chargeMap, setChargeMap] = useState<Record<string, number>>({});
+
   useEffect(() => {
     const colRef = collection(db, "users");
-    const qUsers = query(colRef, orderBy("createdAt", "desc"));
+    const qUsers = query(colRef);
 
     const unsub = onSnapshot(
       qUsers,
@@ -372,8 +194,11 @@ export default function AdminPage() {
             provider: data.provider ?? "",
             createdAt: data.createdAt ?? null,
             lastLoginAt: data.lastLoginAt ?? null,
+            credits: Number(data.credits ?? data.playCredits ?? 0),
           };
         });
+
+        list.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
         setUsers(list);
         setUsersLoading(false);
       },
@@ -387,8 +212,26 @@ export default function AdminPage() {
     return () => unsub();
   }, []);
 
+  async function chargeUser(uid: string) {
+    const amount = Number(chargeMap[uid] ?? 0);
+    if (!amount || amount <= 0) return alert("اكتب رقم شحن صحيح");
+
+    try {
+      await updateDoc(doc(db, "users", uid), {
+        credits: increment(amount),
+        updatedAt: serverTimestamp(),
+      });
+      // صفّر الحقل بعد الشحن
+      setChargeMap((p) => ({ ...p, [uid]: 0 }));
+      alert("تم شحن الرصيد ✅");
+    } catch (e) {
+      console.error(e);
+      alert("فشل شحن الرصيد");
+    }
+  }
+
   // -----------------------------
-  // Marketing (Promo Codes)
+  // Marketing (Promo Codes) + create/toggle/delete
   // -----------------------------
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
   const [promoLoading, setPromoLoading] = useState(true);
@@ -399,7 +242,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     const colRef = collection(db, "promoCodes");
-    const qPromo = query(colRef, orderBy("createdAt", "desc"));
+    const qPromo = query(colRef);
 
     const unsub = onSnapshot(
       qPromo,
@@ -414,8 +257,11 @@ export default function AdminPage() {
             usedCount: Number(data.usedCount ?? 0),
             active: Boolean(data.active),
             createdAt: data.createdAt ?? null,
+            updatedAt: data.updatedAt ?? null,
           };
         });
+
+        list.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
         setPromoCodes(list);
         setPromoLoading(false);
       },
@@ -429,36 +275,122 @@ export default function AdminPage() {
     return () => unsub();
   }, []);
 
-  async function createPromoCode() {
+  async function createPromo() {
     const code = promoCode.trim().toUpperCase();
     if (!code) return alert("اكتب كود الخصم");
 
-    await setDoc(doc(db, "promoCodes", code), {
-      code,
-      percentOff: Number(promoPercent) || 0,
-      maxUses: Number(promoMaxUses) || 0,
-      usedCount: 0,
-      active: true,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    setPromoCode("");
-    setPromoPercent(10);
-    setPromoMaxUses(100);
+    try {
+      await setDoc(doc(db, "promoCodes", code), {
+        code,
+        percentOff: Number(promoPercent) || 0,
+        maxUses: Number(promoMaxUses) || 0,
+        usedCount: 0,
+        active: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setPromoCode("");
+      setPromoPercent(10);
+      setPromoMaxUses(100);
+      alert("تم إنشاء الكود ✅");
+    } catch (e) {
+      console.error(e);
+      alert("فشل إنشاء الكود");
+    }
   }
 
-  async function togglePromoActive(p: PromoCode) {
-    await updateDoc(doc(db, "promoCodes", p.id), {
-      active: !p.active,
-      updatedAt: serverTimestamp(),
-    });
+  async function togglePromo(p: PromoCode) {
+    try {
+      await updateDoc(doc(db, "promoCodes", p.id), {
+        active: !p.active,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error(e);
+      alert("فشل تغيير حالة الكود");
+    }
   }
 
   async function deletePromo(p: PromoCode) {
     const ok = confirm(`حذف كود ${p.code} ؟`);
     if (!ok) return;
-    await deleteDoc(doc(db, "promoCodes", p.id));
+    try {
+      await deleteDoc(doc(db, "promoCodes", p.id));
+    } catch (e) {
+      console.error(e);
+      alert("فشل حذف الكود");
+    }
+  }
+
+  // -----------------------------
+  // Letters (حروف) - collection: lettersGame (docId=letter)
+  // -----------------------------
+  const [lettersLoading, setLettersLoading] = useState(true);
+  const [lettersMap, setLettersMap] = useState<Record<string, LetterDoc>>({});
+
+  const [selectedLetter, setSelectedLetter] = useState<string>("ا");
+  const currentLetterDoc = useMemo(() => lettersMap[selectedLetter] || null, [lettersMap, selectedLetter]);
+
+  const [letterQ, setLetterQ] = useState("");
+  const [letterA, setLetterA] = useState("");
+
+  useEffect(() => {
+    const colRef = collection(db, "lettersGame");
+    const qRef = query(colRef);
+
+    const unsub = onSnapshot(
+      qRef,
+      (snap) => {
+        const map: Record<string, LetterDoc> = {};
+        snap.docs.forEach((d) => {
+          const data = d.data() as any;
+          map[d.id] = {
+            id: d.id,
+            letter: data.letter ?? d.id,
+            question: data.question ?? "",
+            answer: data.answer ?? "",
+            createdAt: data.createdAt ?? null,
+            updatedAt: data.updatedAt ?? null,
+          };
+        });
+        setLettersMap(map);
+        setLettersLoading(false);
+      },
+      (err) => {
+        console.error(err);
+        setLettersMap({});
+        setLettersLoading(false);
+      }
+    );
+
+    return () => unsub();
+  }, []);
+
+  // عبّي الحقول عند تغيير الحرف
+  useEffect(() => {
+    const d = lettersMap[selectedLetter];
+    setLetterQ(d?.question ?? "");
+    setLetterA(d?.answer ?? "");
+  }, [selectedLetter, lettersMap]);
+
+  async function saveLetter() {
+    try {
+      await setDoc(
+        doc(db, "lettersGame", selectedLetter),
+        {
+          letter: selectedLetter,
+          question: (letterQ || "").trim(),
+          answer: (letterA || "").trim(),
+          updatedAt: serverTimestamp(),
+          createdAt: currentLetterDoc?.createdAt ?? serverTimestamp(),
+        },
+        { merge: true }
+      );
+      alert("تم حفظ الحرف ✅");
+    } catch (e) {
+      console.error(e);
+      alert("فشل حفظ الحرف");
+    }
   }
 
   return (
@@ -474,29 +406,20 @@ export default function AdminPage() {
         </div>
 
         <nav className={styles.nav}>
-          <button
-            className={`${styles.navItem} ${tab === "categories" ? styles.navActive : ""}`}
-            onClick={() => setTab("categories")}
-          >
+          <button className={`${styles.navItem} ${tab === "categories" ? styles.navActive : ""}`} onClick={() => setTab("categories")}>
             الفئات
           </button>
-          <button
-            className={`${styles.navItem} ${tab === "questions" ? styles.navActive : ""}`}
-            onClick={() => setTab("questions")}
-          >
+          <button className={`${styles.navItem} ${tab === "questions" ? styles.navActive : ""}`} onClick={() => setTab("questions")}>
             الأسئلة والإجابات
           </button>
-          <button
-            className={`${styles.navItem} ${tab === "users" ? styles.navActive : ""}`}
-            onClick={() => setTab("users")}
-          >
+          <button className={`${styles.navItem} ${tab === "users" ? styles.navActive : ""}`} onClick={() => setTab("users")}>
             المستخدمين
           </button>
-          <button
-            className={`${styles.navItem} ${tab === "marketing" ? styles.navActive : ""}`}
-            onClick={() => setTab("marketing")}
-          >
+          <button className={`${styles.navItem} ${tab === "marketing" ? styles.navActive : ""}`} onClick={() => setTab("marketing")}>
             التسويق
+          </button>
+          <button className={`${styles.navItem} ${tab === "letters" ? styles.navActive : ""}`} onClick={() => setTab("letters")}>
+            إدارة حروف
           </button>
         </nav>
 
@@ -514,8 +437,9 @@ export default function AdminPage() {
           <div className={styles.topbarTitle}>
             {tab === "categories" && "إدارة الفئات"}
             {tab === "questions" && "إدارة الأسئلة والإجابات"}
-            {tab === "users" && "بيانات المستخدمين"}
+            {tab === "users" && "بيانات المستخدمين + شحن الرصيد"}
             {tab === "marketing" && "التسويق وأكواد الخصم"}
+            {tab === "letters" && "إدارة لعبة الحروف"}
           </div>
 
           <div className={styles.topbarActions}>
@@ -527,372 +451,10 @@ export default function AdminPage() {
 
         {/* CONTENT */}
         {tab === "categories" && (
-          <section className={styles.content}>
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h2 className={styles.h2}>إضافة فئة جديدة</h2>
-                <div className={styles.muted}>
-                  تُحفظ داخل: <b>packs/{activePackId}/categories</b> وتظهر مباشرة للاعب.
-                </div>
-              </div>
-
-              <div className={styles.grid3}>
-                <div className={styles.field}>
-                  <label className={styles.label}>اسم الفئة</label>
-                  <input className={styles.input} value={catName} onChange={(e) => setCatName(e.target.value)} />
-                </div>
-
-                <div className={styles.field}>
-                  <label className={styles.label}>الترتيب</label>
-                  <input
-                    className={styles.input}
-                    type="number"
-                    value={catOrder}
-                    onChange={(e) => setCatOrder(Number(e.target.value))}
-                  />
-                </div>
-
-                <div className={styles.field}>
-                  <label className={styles.label}>رابط صورة الفئة</label>
-                  <input className={styles.input} value={catImageUrl} onChange={(e) => setCatImageUrl(e.target.value)} />
-                </div>
-              </div>
-
-              {catImageUrl?.trim() ? (
-                <div className={styles.previewRow}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img className={styles.previewImg} src={catImageUrl.trim()} alt="preview" />
-                </div>
-              ) : null}
-
-              <div className={styles.row}>
-                <button className={styles.primaryBtn} onClick={addCategory}>
-                  إضافة الفئة
-                </button>
-              </div>
-            </div>
-
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h2 className={styles.h2}>قائمة الفئات</h2>
-                <div className={styles.muted}>تعديل/حذف بسرعة</div>
-              </div>
-
-              {catsLoading ? (
-                <div className={styles.loadingLine}>جاري التحميل…</div>
-              ) : categories.length === 0 ? (
-                <div className={styles.empty}>لا توجد فئات بعد.</div>
-              ) : (
-                <div className={styles.tableWrap}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>الصورة</th>
-                        <th>الاسم</th>
-                        <th>الترتيب</th>
-                        <th>إجراءات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {categories.map((c) => (
-                        <tr key={c.id}>
-                          <td>
-                            {c.imageUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img className={styles.avatar} src={c.imageUrl} alt={c.name} />
-                            ) : (
-                              <div className={styles.avatarPlaceholder} />
-                            )}
-                          </td>
-                          <td>{c.name}</td>
-                          <td>{Number(c.order || 0)}</td>
-                          <td>
-                            <div className={styles.row}>
-                              <button className={styles.btnSmall} onClick={() => startEditCategory(c)}>
-                                تعديل
-                              </button>
-                              <button className={styles.dangerBtnSmall} onClick={() => removeCategory(c.id)}>
-                                حذف
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* Edit Modal */}
-            {editingCat && (
-              <div className={styles.modalOverlay} onMouseDown={() => setEditingCatId(null)}>
-                <div className={styles.modal} onMouseDown={(e) => e.stopPropagation()}>
-                  <div className={styles.modalHeader}>
-                    <div className={styles.h2}>تعديل الفئة</div>
-                    <button className={styles.modalClose} onClick={() => setEditingCatId(null)}>
-                      ×
-                    </button>
-                  </div>
-
-                  <div className={styles.grid3}>
-                    <div className={styles.field}>
-                      <label className={styles.label}>الاسم</label>
-                      <input className={styles.input} value={editCatName} onChange={(e) => setEditCatName(e.target.value)} />
-                    </div>
-                    <div className={styles.field}>
-                      <label className={styles.label}>الترتيب</label>
-                      <input
-                        className={styles.input}
-                        type="number"
-                        value={editCatOrder}
-                        onChange={(e) => setEditCatOrder(Number(e.target.value))}
-                      />
-                    </div>
-                    <div className={styles.field}>
-                      <label className={styles.label}>رابط الصورة</label>
-                      <input className={styles.input} value={editCatImageUrl} onChange={(e) => setEditCatImageUrl(e.target.value)} />
-                    </div>
-                  </div>
-
-                  {editCatImageUrl?.trim() ? (
-                    <div className={styles.previewRow}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img className={styles.previewImg} src={editCatImageUrl.trim()} alt="preview" />
-                    </div>
-                  ) : null}
-
-                  <div className={styles.rowBetween}>
-                    <button className={styles.btn} onClick={() => setEditingCatId(null)}>
-                      إلغاء
-                    </button>
-                    <button className={styles.primaryBtn} onClick={saveEditCategory}>
-                      حفظ التعديل
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
+          <CategoriesTab activePackId={activePackId} categories={categories} catsLoading={catsLoading} />
         )}
 
-        {/* QUESTIONS */}
-        {tab === "questions" && (
-          <section className={styles.content}>
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h2 className={styles.h2}>اختيار الفئة</h2>
-                <div className={styles.muted}>حدد الفئة لإدارة أسئلتها وإجاباتها</div>
-              </div>
-
-              <div className={styles.row}>
-                <select className={styles.input} value={selectedCatId} onChange={(e) => setSelectedCatId(e.target.value)}>
-                  {categories.length === 0 ? (
-                    <option value="">لا توجد فئات</option>
-                  ) : (
-                    categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))
-                  )}
-                </select>
-              </div>
-            </div>
-
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h2 className={styles.h2}>إضافة سؤال + إجابة</h2>
-                <div className={styles.muted}>السؤال يحتوي نقاط + صورة (اختياري) + إجابة (نص/صورة)</div>
-              </div>
-
-              <div className={styles.field}>
-                <label className={styles.label}>نص السؤال</label>
-                <textarea className={styles.textarea} value={qText} onChange={(e) => setQText(e.target.value)} />
-              </div>
-
-              <div className={styles.grid3}>
-                <div className={styles.field}>
-                  <label className={styles.label}>النقاط</label>
-                  <input className={styles.input} type="number" value={qPoints} onChange={(e) => setQPoints(Number(e.target.value))} />
-                </div>
-
-                <div className={styles.field}>
-                  <label className={styles.label}>رابط صورة السؤال (اختياري)</label>
-                  <input className={styles.input} value={qImageUrl} onChange={(e) => setQImageUrl(e.target.value)} />
-                </div>
-
-                <div className={styles.field}>
-                  <label className={styles.label}>رابط صورة الإجابة (اختياري)</label>
-                  <input className={styles.input} value={aImageUrl} onChange={(e) => setAImageUrl(e.target.value)} />
-                </div>
-              </div>
-
-              <div className={styles.field}>
-                <label className={styles.label}>الإجابة (نص)</label>
-                <input className={styles.input} value={aText} onChange={(e) => setAText(e.target.value)} />
-              </div>
-
-              {(qImageUrl.trim() || aImageUrl.trim()) && (
-                <div className={styles.previewGrid}>
-                  {qImageUrl.trim() ? (
-                    <div className={styles.previewBox}>
-                      <div className={styles.previewTitle}>صورة السؤال</div>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img className={styles.previewImg} src={qImageUrl.trim()} alt="q" />
-                    </div>
-                  ) : null}
-                  {aImageUrl.trim() ? (
-                    <div className={styles.previewBox}>
-                      <div className={styles.previewTitle}>صورة الإجابة</div>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img className={styles.previewImg} src={aImageUrl.trim()} alt="a" />
-                    </div>
-                  ) : null}
-                </div>
-              )}
-
-              <div className={styles.row}>
-                <button className={styles.primaryBtn} onClick={addQuestion} disabled={!selectedCatId}>
-                  إضافة السؤال
-                </button>
-              </div>
-            </div>
-
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h2 className={styles.h2}>أسئلة هذه الفئة</h2>
-                <div className={styles.muted}>تعديل/حذف — ترتيب تلقائي حسب النقاط</div>
-              </div>
-
-              {qsLoading ? (
-                <div className={styles.loadingLine}>جاري التحميل…</div>
-              ) : questions.length === 0 ? (
-                <div className={styles.empty}>لا توجد أسئلة في هذه الفئة.</div>
-              ) : (
-                <div className={styles.tableWrap}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>النقاط</th>
-                        <th>السؤال</th>
-                        <th>الإجابة</th>
-                        <th>إجراءات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {questions.map((q) => (
-                        <tr key={q.id}>
-                          <td>{q.points}</td>
-                          <td className={styles.tdWide}>
-                            <div className={styles.qCell}>
-                              <div className={styles.qText}>{q.text}</div>
-                              {q.imageUrl ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img className={styles.inlineImg} src={q.imageUrl} alt="q" />
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className={styles.tdWide}>
-                            <div className={styles.qCell}>
-                              <div className={styles.qText}>{q.answerText}</div>
-                              {q.answerImageUrl ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img className={styles.inlineImg} src={q.answerImageUrl} alt="a" />
-                              ) : null}
-                            </div>
-                          </td>
-                          <td>
-                            <div className={styles.row}>
-                              <button className={styles.btnSmall} onClick={() => startEditQuestion(q)}>
-                                تعديل
-                              </button>
-                              <button className={styles.dangerBtnSmall} onClick={() => removeQuestion(q.id)}>
-                                حذف
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* Edit Question Modal */}
-            {editingQ && (
-              <div className={styles.modalOverlay} onMouseDown={() => setEditingQId(null)}>
-                <div className={styles.modal} onMouseDown={(e) => e.stopPropagation()}>
-                  <div className={styles.modalHeader}>
-                    <div className={styles.h2}>تعديل السؤال</div>
-                    <button className={styles.modalClose} onClick={() => setEditingQId(null)}>
-                      ×
-                    </button>
-                  </div>
-
-                  <div className={styles.field}>
-                    <label className={styles.label}>نص السؤال</label>
-                    <textarea className={styles.textarea} value={editQText} onChange={(e) => setEditQText(e.target.value)} />
-                  </div>
-
-                  <div className={styles.grid3}>
-                    <div className={styles.field}>
-                      <label className={styles.label}>النقاط</label>
-                      <input
-                        className={styles.input}
-                        type="number"
-                        value={editQPoints}
-                        onChange={(e) => setEditQPoints(Number(e.target.value))}
-                      />
-                    </div>
-                    <div className={styles.field}>
-                      <label className={styles.label}>رابط صورة السؤال</label>
-                      <input className={styles.input} value={editQImageUrl} onChange={(e) => setEditQImageUrl(e.target.value)} />
-                    </div>
-                    <div className={styles.field}>
-                      <label className={styles.label}>رابط صورة الإجابة</label>
-                      <input className={styles.input} value={editAImageUrl} onChange={(e) => setEditAImageUrl(e.target.value)} />
-                    </div>
-                  </div>
-
-                  <div className={styles.field}>
-                    <label className={styles.label}>الإجابة (نص)</label>
-                    <input className={styles.input} value={editAText} onChange={(e) => setEditAText(e.target.value)} />
-                  </div>
-
-                  {(editQImageUrl.trim() || editAImageUrl.trim()) && (
-                    <div className={styles.previewGrid}>
-                      {editQImageUrl.trim() ? (
-                        <div className={styles.previewBox}>
-                          <div className={styles.previewTitle}>صورة السؤال</div>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img className={styles.previewImg} src={editQImageUrl.trim()} alt="q" />
-                        </div>
-                      ) : null}
-                      {editAImageUrl.trim() ? (
-                        <div className={styles.previewBox}>
-                          <div className={styles.previewTitle}>صورة الإجابة</div>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img className={styles.previewImg} src={editAImageUrl.trim()} alt="a" />
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
-
-                  <div className={styles.rowBetween}>
-                    <button className={styles.btn} onClick={() => setEditingQId(null)}>
-                      إلغاء
-                    </button>
-                    <button className={styles.primaryBtn} onClick={saveEditQuestion}>
-                      حفظ التعديل
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
-        )}
+        {tab === "questions" && <QuestionsTab activePackId={activePackId} categories={categories} />}
 
         {/* USERS */}
         {tab === "users" && (
@@ -900,7 +462,7 @@ export default function AdminPage() {
             <div className={styles.card}>
               <div className={styles.cardHeader}>
                 <h2 className={styles.h2}>المستخدمين المسجلين</h2>
-                <div className={styles.muted}>هذا يعرض محتوى collection: users</div>
+                <div className={styles.muted}>هنا تقدر تشوفهم وتشحن لهم رصيد لعب (credits)</div>
               </div>
 
               {usersLoading ? (
@@ -915,7 +477,8 @@ export default function AdminPage() {
                         <th>الصورة</th>
                         <th>الاسم</th>
                         <th>الإيميل</th>
-                        <th>المزوّد</th>
+                        <th>الرصيد</th>
+                        <th>شحن</th>
                         <th>آخر دخول</th>
                       </tr>
                     </thead>
@@ -932,7 +495,22 @@ export default function AdminPage() {
                           </td>
                           <td>{u.name || "—"}</td>
                           <td>{u.email || "—"}</td>
-                          <td>{u.provider || "—"}</td>
+                          <td style={{ fontWeight: 900 }}>{u.credits ?? 0}</td>
+                          <td>
+                            <div className={styles.row}>
+                              <input
+                                className={styles.input}
+                                style={{ maxWidth: 120 }}
+                                type="number"
+                                value={chargeMap[u.id] ?? 0}
+                                onChange={(e) => setChargeMap((p) => ({ ...p, [u.id]: Number(e.target.value) }))}
+                                placeholder="مثال: 10"
+                              />
+                              <button className={styles.btnSmall} onClick={() => chargeUser(u.id)}>
+                                شحن
+                              </button>
+                            </div>
+                          </td>
                           <td>{u.lastLoginAt?.toDate?.() ? u.lastLoginAt.toDate().toLocaleString() : "—"}</td>
                         </tr>
                       ))}
@@ -950,43 +528,28 @@ export default function AdminPage() {
             <div className={styles.card}>
               <div className={styles.cardHeader}>
                 <h2 className={styles.h2}>إنشاء كود خصم</h2>
-                <div className={styles.muted}>مجهز للمستقبل — بدون نظام دفع الآن</div>
+                <div className={styles.muted}>أضف كود جديد + نسبة + حد الاستخدام</div>
               </div>
 
               <div className={styles.grid3}>
                 <div className={styles.field}>
                   <label className={styles.label}>الكود</label>
-                  <input
-                    className={styles.input}
-                    value={promoCode}
-                    onChange={(e) => setPromoCode(e.target.value)}
-                    placeholder="مثال: ASSEM10"
-                  />
+                  <input className={styles.input} value={promoCode} onChange={(e) => setPromoCode(e.target.value)} placeholder="ASSEM10" />
                 </div>
 
                 <div className={styles.field}>
                   <label className={styles.label}>نسبة الخصم %</label>
-                  <input
-                    className={styles.input}
-                    type="number"
-                    value={promoPercent}
-                    onChange={(e) => setPromoPercent(Number(e.target.value))}
-                  />
+                  <input className={styles.input} type="number" value={promoPercent} onChange={(e) => setPromoPercent(Number(e.target.value))} />
                 </div>
 
                 <div className={styles.field}>
                   <label className={styles.label}>حد الاستخدام</label>
-                  <input
-                    className={styles.input}
-                    type="number"
-                    value={promoMaxUses}
-                    onChange={(e) => setPromoMaxUses(Number(e.target.value))}
-                  />
+                  <input className={styles.input} type="number" value={promoMaxUses} onChange={(e) => setPromoMaxUses(Number(e.target.value))} />
                 </div>
               </div>
 
               <div className={styles.row}>
-                <button className={styles.primaryBtn} onClick={createPromoCode}>
+                <button className={styles.primaryBtn} onClick={createPromo}>
                   إنشاء الكود
                 </button>
               </div>
@@ -995,7 +558,7 @@ export default function AdminPage() {
             <div className={styles.card}>
               <div className={styles.cardHeader}>
                 <h2 className={styles.h2}>أكواد الخصم</h2>
-                <div className={styles.muted}>تفعيل/تعطيل وحذف</div>
+                <div className={styles.muted}>تفعيل/تعطيل + حذف</div>
               </div>
 
               {promoLoading ? (
@@ -1029,7 +592,7 @@ export default function AdminPage() {
                           </td>
                           <td>
                             <div className={styles.row}>
-                              <button className={styles.btnSmall} onClick={() => togglePromoActive(p)}>
+                              <button className={styles.btnSmall} onClick={() => togglePromo(p)}>
                                 {p.active ? "إيقاف" : "تفعيل"}
                               </button>
                               <button className={styles.dangerBtnSmall} onClick={() => deletePromo(p)}>
@@ -1042,6 +605,53 @@ export default function AdminPage() {
                     </tbody>
                   </table>
                 </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* LETTERS */}
+        {tab === "letters" && (
+          <section className={styles.content}>
+            <div className={styles.card}>
+              <div className={styles.cardHeader}>
+                <h2 className={styles.h2}>إدارة الحروف</h2>
+                <div className={styles.muted}>
+                  لعبة مستقلة: تختار حرف وتكتب سؤال/إجابة (بدون صور). التخزين في <b>lettersGame</b>
+                </div>
+              </div>
+
+              {lettersLoading ? (
+                <div className={styles.loadingLine}>جاري التحميل…</div>
+              ) : (
+                <>
+                  <div className={styles.field}>
+                    <label className={styles.label}>اختر الحرف</label>
+                    <select className={styles.input} value={selectedLetter} onChange={(e) => setSelectedLetter(e.target.value)}>
+                      {AR_LETTERS.map((l) => (
+                        <option key={l} value={l}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className={styles.field}>
+                    <label className={styles.label}>السؤال</label>
+                    <textarea className={styles.textarea} value={letterQ} onChange={(e) => setLetterQ(e.target.value)} placeholder={`اكتب سؤال حرف (${selectedLetter})`} />
+                  </div>
+
+                  <div className={styles.field}>
+                    <label className={styles.label}>الإجابة</label>
+                    <textarea className={styles.textarea} value={letterA} onChange={(e) => setLetterA(e.target.value)} placeholder="اكتب الإجابة" />
+                  </div>
+
+                  <div className={styles.row}>
+                    <button className={styles.primaryBtn} onClick={saveLetter}>
+                      حفظ
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </section>

@@ -1,3 +1,4 @@
+// app/game/GameBoardClient.tsx
 "use client";
 
 import Link from "next/link";
@@ -7,8 +8,9 @@ import styles from "./page.module.css";
 
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, where, documentId } from "firebase/firestore";
+import { Icon } from "@iconify/react";
 
-type Team = { name: string; score: number };
+type Team = { name: string; score: number; icon?: string };
 type CatMeta = { id: string; name: string; imageUrl?: string };
 
 const LS_KEY = "assem_game_v1";
@@ -25,6 +27,7 @@ function loadGame() {
     return null;
   }
 }
+
 function saveGame(data: any) {
   localStorage.setItem(LS_KEY, JSON.stringify(data));
 }
@@ -37,6 +40,16 @@ function normalizeCatsParam(input: string) {
     s = once.replace(/%2C/gi, ",");
   } catch {}
   return s;
+}
+
+function renderTeamIcon(icon?: string, size = 18) {
+  if (!icon) return null;
+  // إذا كانت Iconify id مثل "mdi:soccer"
+  if (typeof icon === "string" && icon.includes(":")) {
+    return <Icon icon={icon} width={size} height={size} />;
+  }
+  // لو كان شيء قديم (ايموجي)
+  return <span>{icon}</span>;
 }
 
 export default function GameBoardClient() {
@@ -67,9 +80,14 @@ export default function GameBoardClient() {
   const [catsMeta, setCatsMeta] = useState<Record<string, CatMeta>>({});
 
   // ✅ هل توجد خلية فعلاً؟ + ربط كل خلية بـ questionId ثابت
-  // (مفتاح الخلية صار فيه idx عشان يكون عندنا خلية أولى وثانية لنفس النقاط)
   const [hasQuestion, setHasQuestion] = useState<Record<string, boolean>>({});
   const [qidByCell, setQidByCell] = useState<Record<string, string>>({});
+
+  // ✅ مهم: نعرف متى "تحميل الأسئلة" اكتمل فعلاً (عشان لا تظهر النهاية أول ما نفتح اللوحة)
+  const [questionsReady, setQuestionsReady] = useState(false);
+
+  // ✅ نهاية اللعبة (بوديوم)
+  const [showEnd, setShowEnd] = useState(false);
 
   // ✅ جلب ميتا الفئات (الاسم + الصورة)
   useEffect(() => {
@@ -87,8 +105,8 @@ export default function GameBoardClient() {
           const data = d.data?.() ?? {};
           map[d.id] = {
             id: d.id,
-            name: data.name ?? data.title ?? data.catName ?? d.id,
-            imageUrl: data.imageUrl ?? data.image ?? data.photoUrl ?? "",
+            name: (data.name ?? data.title ?? data.catName ?? "").toString().trim(),
+            imageUrl: (data.imageUrl ?? data.image ?? data.photoUrl ?? "").toString().trim(),
           };
         });
         return map;
@@ -102,12 +120,10 @@ export default function GameBoardClient() {
         const snap1 = await getDocs(q1);
         let map = buildMap(snap1);
 
-        const missing = catIds.filter((id) => !map[id]);
+        // fallback
+        const missing = catIds.filter((id) => !(map[id]?.name || "").trim());
         if (missing.length) {
-          const q2 = query(
-            collection(db, "categories"),
-            where(documentId(), "in", missing.slice(0, 10))
-          );
+          const q2 = query(collection(db, "categories"), where(documentId(), "in", missing.slice(0, 10)));
           const snap2 = await getDocs(q2);
           map = { ...map, ...buildMap(snap2) };
         }
@@ -129,9 +145,12 @@ export default function GameBoardClient() {
     let cancelled = false;
 
     (async () => {
+      setQuestionsReady(false);
+
       if (!catIds.length) {
         setHasQuestion({});
         setQidByCell({});
+        setQuestionsReady(true);
         return;
       }
 
@@ -140,11 +159,8 @@ export default function GameBoardClient() {
         const idMap: Record<string, string> = {};
 
         for (const catId of catIds) {
-          const snap = await getDocs(
-            collection(db, "packs", "main", "categories", catId, "questions")
-          );
+          const snap = await getDocs(collection(db, "packs", "main", "categories", catId, "questions"));
 
-          // نجمع المرشحين لكل نقاط
           const bucket: Record<number, string[]> = { 200: [], 400: [], 600: [] };
 
           snap.forEach((d) => {
@@ -154,17 +170,14 @@ export default function GameBoardClient() {
             bucket[pts].push(d.id);
           });
 
-          // ✅ نخلي الاختيار ثابت: ترتيب id تصاعدي
+          // ✅ اختيار ثابت: sort by id
           for (const pts of [200, 400, 600] as const) {
             const ids = (bucket[pts] || []).slice().sort();
-
-            // الخلية الأولى
             if (ids[0]) {
               const key0 = `${catId}:${pts}:0`;
               hasMap[key0] = true;
               idMap[key0] = ids[0];
             }
-            // الخلية الثانية
             if (ids[1]) {
               const key1 = `${catId}:${pts}:1`;
               hasMap[key1] = true;
@@ -176,12 +189,14 @@ export default function GameBoardClient() {
         if (!cancelled) {
           setHasQuestion(hasMap);
           setQidByCell(idMap);
+          setQuestionsReady(true);
         }
       } catch (e) {
         console.error(e);
         if (!cancelled) {
           setHasQuestion({});
           setQidByCell({});
+          setQuestionsReady(true);
         }
       }
     })();
@@ -191,7 +206,6 @@ export default function GameBoardClient() {
     };
   }, [catIds.join("|")]);
 
-  // ✅ idx = 0 أو 1 (أي خلية من الثنتين)
   function isUsed(catId: string, pts: number, idx: number) {
     return !!game?.used?.[`${catId}:${pts}:${idx}`];
   }
@@ -200,9 +214,37 @@ export default function GameBoardClient() {
     return !!hasQuestion[`${catId}:${pts}:${idx}`];
   }
 
+  // ✅ عدد الخلايا المتاحة فعلياً (لو = 0 ما نعتبر اللعبة "انتهت")
+  const availableCellsCount = useMemo(() => Object.keys(hasQuestion).length, [hasQuestion]);
+
+  // ✅ هل انتهت كل الخلايا؟
+  const allCellsDone = useMemo(() => {
+    if (!questionsReady) return false;
+    if (!game || !catIds.length) return false;
+    if (availableCellsCount === 0) return false;
+
+    for (const catId of catIds) {
+      for (const pts of [200, 400, 600] as const) {
+        for (const idx of [0, 1] as const) {
+          const key = `${catId}:${pts}:${idx}`;
+          const available = !!hasQuestion[key];
+          if (available) {
+            const used = !!game?.used?.[key];
+            if (!used) return false;
+          }
+        }
+      }
+    }
+    return true;
+  }, [questionsReady, game, catIds.join("|"), hasQuestion, availableCellsCount]);
+
+  useEffect(() => {
+    if (!game) return;
+    if (questionsReady && allCellsDone) setShowEnd(true);
+  }, [questionsReady, allCellsDone, game]);
+
   function openQuestion(catId: string, pts: number, idx: number) {
     if (!game) return;
-
     const key = `${catId}:${pts}:${idx}`;
     const qid = qidByCell[key] || "";
 
@@ -223,6 +265,35 @@ export default function GameBoardClient() {
     setGame(updated);
   }
 
+  // ✅ زر تبديل الفريق (داخل دور الفريق)
+  function switchTeam() {
+    if (!game) return;
+    const teamsCount = Number(game?.teams?.length || 0);
+    if (teamsCount <= 1) return;
+
+    const updated = { ...game };
+    const cur = Number(updated.turnIndex || 0);
+    updated.turnIndex = (cur + 1) % teamsCount;
+
+    saveGame(updated);
+    setGame(updated);
+  }
+
+  function finishAndGoHome() {
+    localStorage.removeItem(LS_KEY);
+    router.push("/");
+  }
+
+  function restartGame() {
+    router.push("/categories");
+  }
+
+  const podium = useMemo(() => {
+    const teams: Team[] = (game?.teams || []).slice();
+    teams.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+    return teams;
+  }, [game]);
+
   if (!game) {
     return (
       <div className={styles.page}>
@@ -236,8 +307,141 @@ export default function GameBoardClient() {
     );
   }
 
+  const currentTeam: Team | undefined = game?.teams?.[game?.turnIndex ?? 0];
+
   return (
-    <div className={styles.page}>
+    <div className={styles.page} style={{ overflow: "hidden" }}>
+      {/* ✅ نهاية اللعبة */}
+      {showEnd ? (
+        <div className={styles.endOverlay}>
+          <div className={styles.endCard}>
+            <div className={styles.endHeader}>
+              <div>
+                <div className={styles.endTitle}>انتهت اللعبة 🎉</div>
+                <div className={styles.endSub}>الترتيب حسب أعلى النقاط</div>
+              </div>
+              <button className={styles.endBtnGhost} onClick={() => setShowEnd(false)} type="button">
+                إغلاق
+              </button>
+            </div>
+
+            <div className={styles.podiumWrap}>
+              <div className={styles.podium}>
+                {/* 2nd */}
+                <div className={styles.podiumCol}>
+                  <div className={styles.podiumTop}>
+                    <span className={`${styles.badge} ${styles.badge2}`}>2</span>
+                    <span>الثاني</span>
+                  </div>
+                  <div className={styles.podiumName} title={podium[1]?.name || "—"}>
+                    {podium[1]?.icon ? <span style={{ marginInlineEnd: 8 }}>{renderTeamIcon(podium[1].icon, 18)}</span> : null}
+                    {podium[1]?.name || "—"}
+                  </div>
+                  <div className={styles.podiumScore}>{podium[1]?.score ?? 0}</div>
+                  <div className={`${styles.podiumBase} ${styles.base2}`}>🥈</div>
+                </div>
+
+                {/* 1st */}
+                <div className={styles.podiumCol}>
+                  <div className={styles.podiumTop}>
+                    <span className={`${styles.badge} ${styles.badge1}`}>1</span>
+                    <span>الأول</span>
+                  </div>
+                  <div className={styles.podiumName} title={podium[0]?.name || "—"}>
+                    {podium[0]?.icon ? <span style={{ marginInlineEnd: 8 }}>{renderTeamIcon(podium[0].icon, 18)}</span> : null}
+                    {podium[0]?.name || "—"}
+                  </div>
+                  <div className={styles.podiumScore}>{podium[0]?.score ?? 0}</div>
+                  <div className={`${styles.podiumBase} ${styles.base1}`}>🏆</div>
+                </div>
+
+                {/* 3rd */}
+                <div className={styles.podiumCol}>
+                  <div className={styles.podiumTop}>
+                    <span className={`${styles.badge} ${styles.badge3}`}>3</span>
+                    <span>الثالث</span>
+                  </div>
+                  <div className={styles.podiumName} title={podium[2]?.name || "—"}>
+                    {podium[2]?.icon ? <span style={{ marginInlineEnd: 8 }}>{renderTeamIcon(podium[2].icon, 18)}</span> : null}
+                    {podium[2]?.name || "—"}
+                  </div>
+                  <div className={styles.podiumScore}>{podium[2]?.score ?? 0}</div>
+                  <div className={`${styles.podiumBase} ${styles.base3}`}>🥉</div>
+                </div>
+              </div>
+
+              {podium.length > 3 ? (
+                <div style={{ background: "white", borderRadius: 18, border: "2px solid rgba(13,59,102,.10)", padding: 14 }}>
+                  <div style={{ fontWeight: 900, color: "var(--navy)", marginBottom: 10 }}>باقي الترتيب</div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {podium.slice(3).map((t, idx) => (
+                      <div
+                        key={`${t.name}-${idx}`}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 10,
+                          padding: "10px 12px",
+                          borderRadius: 14,
+                          border: "2px solid rgba(13,59,102,.10)",
+                          background: "rgba(13,59,102,.04)",
+                          fontWeight: 900,
+                          color: "var(--navy)",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, overflow: "hidden" }}>
+                          <div
+                            style={{
+                              width: 34,
+                              height: 34,
+                              borderRadius: 12,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              border: "2px solid rgba(13,59,102,.14)",
+                              background: "white",
+                              flex: "0 0 auto",
+                            }}
+                          >
+                            {idx + 4}
+                          </div>
+                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {t.icon ? <span style={{ marginInlineEnd: 8 }}>{renderTeamIcon(t.icon, 18)}</span> : null}
+                            {t.name}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            background: "rgba(250,240,202,.75)",
+                            border: "2px solid rgba(13,59,102,.12)",
+                            borderRadius: 999,
+                            padding: "6px 10px",
+                            minWidth: 64,
+                            textAlign: "center",
+                          }}
+                        >
+                          {t.score ?? 0}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className={styles.endActions}>
+              <button className={styles.endBtn} onClick={restartGame} type="button">
+                لعبة جديدة
+              </button>
+              <button className={styles.endBtnGhost} onClick={finishAndGoHome} type="button">
+                إنهاء والعودة للرئيسية
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <header className={styles.topBar}>
         <div className={styles.leftBtns}>
           <Link className={styles.smallBtn} href="/categories">
@@ -256,11 +460,37 @@ export default function GameBoardClient() {
           </button>
         </div>
 
-        <div className={styles.centerTitle}>لعبة جديدة</div>
+        {/* ✅ (2) تغيير العنوان */}
+        <div className={styles.centerTitle}>لعبة مستوى</div>
 
         <div className={styles.turnPill}>
+          {/* ✅ (3) زر تبديل الفريق داخل دور الفريق */}
+          <button
+            type="button"
+            onClick={switchTeam}
+            title="تبديل الفريق"
+            aria-label="تبديل الفريق"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 34,
+              height: 34,
+              borderRadius: 999,
+              background: "rgba(250,240,202,.12)",
+              border: "1px solid rgba(250,240,202,.25)",
+              color: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            <Icon icon="mdi:rotate-right" width="18" height="18" />
+          </button>
+
           <span>دور فريق:</span>
-          <b>{game?.teams?.[game?.turnIndex ?? 0]?.name ?? "—"}</b>
+          <b style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            {currentTeam?.icon ? renderTeamIcon(currentTeam.icon, 18) : null}
+            <span>{currentTeam?.name ?? "—"}</span>
+          </b>
         </div>
       </header>
 
@@ -271,39 +501,59 @@ export default function GameBoardClient() {
             gridTemplateColumns: `repeat(${catIds.length}, minmax(0, 1fr))`,
           }}
         >
+          {/* ✅ الهيدر يرجع طبيعي (اسم + صورة). لو ميتا فئة معيّنة ناقصة، نعرض Skeleton لها فقط */}
           {catIds.map((catId) => {
             const meta = catsMeta[catId];
-            const title = meta?.name || catId;
+            const title = (meta?.name || "").trim();
+            const img = (meta?.imageUrl || "").trim();
+
+            const loadingHeader = !title; // ما نعرض catId أبداً
 
             return (
               <div key={catId} className={styles.catHeader} style={{ backgroundImage: "none" as any }}>
-                <div className={styles.catName} style={{ marginBottom: 8 }}>
-                  {title}
-                </div>
-
-                {meta?.imageUrl?.trim() ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={meta.imageUrl.trim()}
-                    alt={title}
-                    style={{
-                      width: "100%",
-                      height: 92,
-                      objectFit: "cover",
-                      borderRadius: 14,
-                      border: "1px solid rgba(255,255,255,.20)",
-                    }}
-                  />
+                {loadingHeader ? (
+                  <>
+                    <div style={{ height: 18, borderRadius: 10, background: "rgba(13,59,102,.10)", marginBottom: 10 }} />
+                    <div
+                      style={{
+                        height: 92,
+                        borderRadius: 14,
+                        background: "rgba(13,59,102,.08)",
+                        border: "1px solid rgba(13,59,102,.10)",
+                      }}
+                    />
+                  </>
                 ) : (
-                  <div
-                    style={{
-                      width: "100%",
-                      height: 92,
-                      borderRadius: 14,
-                      background: "rgba(255,255,255,.10)",
-                      border: "1px solid rgba(255,255,255,.14)",
-                    }}
-                  />
+                  <>
+                    <div style={{ fontWeight: 900, color: "var(--navy)", marginBottom: 8, textAlign: "center" }}>
+                      {title}
+                    </div>
+
+                    {img ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={img}
+                        alt={title}
+                        style={{
+                          width: "100%",
+                          height: 92,
+                          objectFit: "cover",
+                          borderRadius: 14,
+                          border: "1px solid rgba(255,255,255,.20)",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: "100%",
+                          height: 92,
+                          borderRadius: 14,
+                          background: "rgba(255,255,255,.10)",
+                          border: "1px solid rgba(255,255,255,.14)",
+                        }}
+                      />
+                    )}
+                  </>
                 )}
               </div>
             );
@@ -312,7 +562,6 @@ export default function GameBoardClient() {
           {/* ✅ 6 صفوف */}
           {POINTS_ROWS.map((pts, rowIndex) =>
             catIds.map((catId) => {
-              // كل نقطتين لها idx: 0 ثم 1
               const idx = rowIndex % 2;
 
               const used = isUsed(catId, pts, idx);
@@ -337,26 +586,19 @@ export default function GameBoardClient() {
         <section className={styles.teamsBar}>
           {game?.teams?.map((t: Team, i: number) => (
             <div key={i} className={styles.teamCard}>
-              <div className={styles.teamName}>{t.name}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, overflow: "hidden" }}>
+                {t.icon ? renderTeamIcon(t.icon, 18) : null}
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
+              </div>
 
-              <div className={styles.teamScoreRow}>
-                <button
-                  className={styles.scoreBtn}
-                  onClick={() => changeScore(i, -50)}
-                  type="button"
-                  title="نقص 50"
-                >
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <button className={styles.scoreBtn} onClick={() => changeScore(i, -50)} type="button" title="نقص 50">
                   −
                 </button>
 
                 <div className={styles.teamScore}>{t.score}</div>
 
-                <button
-                  className={styles.scoreBtn}
-                  onClick={() => changeScore(i, +50)}
-                  type="button"
-                  title="زود 50"
-                >
+                <button className={styles.scoreBtn} onClick={() => changeScore(i, +50)} type="button" title="زود 50">
                   +
                 </button>
               </div>

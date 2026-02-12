@@ -1,5 +1,4 @@
-// app/login/page.tsx
-"use client";
+"use client"; 
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -10,17 +9,15 @@ import {
 } from "firebase/auth";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
-import { isAdminEmail } from "@/lib/admin";
 
 export default function PlayerLoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
-  // إذا اللاعب مسجل دخول بالفعل، ودّه للفئات (لكن إذا أدمن لا نوديه هنا)
+  // إذا اللاعب مسجل دخول بالفعل، نوديه للفئات فقط
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (!user) return;
-      if (isAdminEmail(user.email)) return; // الأدمن دخوله من /admin/login
       router.replace("/categories");
     });
     return () => unsub();
@@ -46,12 +43,9 @@ export default function PlayerLoginPage() {
         { merge: true }
       );
 
-      // إذا أدمن بالخطأ دخل من هنا، لا نوديه للعبة
-      if (isAdminEmail(res.user.email)) {
-        router.replace("/admin");
-      } else {
-        router.replace("/categories");
-      }
+      // ✅ أي شخص يسجل هنا يروح للفئات فقط
+      router.replace("/categories");
+
     } catch (e: any) {
       alert(e?.message || "حدث خطأ في تسجيل الدخول");
     } finally {

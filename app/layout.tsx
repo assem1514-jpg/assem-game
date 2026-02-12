@@ -1,10 +1,11 @@
 // app/layout.tsx
 import "./globals.css";
 import type { Metadata } from "next";
+import { AuthProvider } from "@/lib/authContext";
 
 export const metadata: Metadata = {
-  title: "Assem Game",
-  description: "Assem Game",
+  title: "مستوى",
+  description: "لعبة مستوى",
 };
 
 export default function RootLayout({
@@ -14,7 +15,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ar" dir="rtl">
-      <body style={{ margin: 0 }}>{children}</body>
+      <body style={{ margin: 0 }}>
+        <AuthProvider>
+          {children}
+        </AuthProvider>
+      </body>
     </html>
   );
 }

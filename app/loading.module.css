@@ -1,0 +1,39 @@
+.wrapper {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(135deg, #0d3b66, #124c85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.center {
+  text-align: center;
+  animation: fadeIn 0.8s ease-in-out;
+}
+
+.logo {
+  width: clamp(140px, 18vw, 260px);
+  margin-bottom: 20px;
+  animation: pulse 2s infinite ease-in-out;
+}
+
+.text {
+  color: #faf0ca;
+  font-size: 18px;
+  font-weight: 800;
+  opacity: 0.9;
+}
+
+/* حركة خفيفة */
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.85; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
