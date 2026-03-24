@@ -1,202 +1,527 @@
-/* =========================
-   PAGE LAYOUT (NO SCROLL)
-   ========================= */
+:global(:root){
+  --navy:#0D3B66;
+  --cream:#FAF0CA;
+  --yellow:#F4D35E;
+  --blueSoft:#D7DEF0;
+  --shadow:0 10px 25px rgba(0,0,0,.12);
+}
 
-html, body {
-  height: 100%;
-  overflow: hidden; /* 🔒 منع أي سحب */
-  overscroll-behavior: none;
+:global(html){
+  height:100%;
+  overflow:hidden;
+  overscroll-behavior:none;
+}
+
+:global(body){
+  height:100%;
+  overflow:hidden;
+  overscroll-behavior:none;
+  background:var(--cream);
 }
 
 .page{
-  height:100dvh;               /* ⬅️ بدل min-height */
+  width:100vw;
+  height:100dvh;
   background:var(--cream);
+  overflow:hidden;
+  display:flex;
+  align-items:center;
+  justify-content:center;
   padding:12px;
+  box-sizing:border-box;
+}
 
-  padding-top: calc(12px + env(safe-area-inset-top));
-  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+.fitWrap{
+  width:100%;
+  height:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+}
 
-  overflow:hidden;             /* 🔒 الصفحة ثابتة */
+.stageScale{
+  transform-origin:center center;
+  flex:0 0 auto;
+}
+
+.stage{
+  width:1600px;
+  height:900px;
+  background:var(--cream);
+  color:var(--navy);
   display:flex;
   flex-direction:column;
+  gap:16px;
+  overflow:hidden;
 }
 
 /* =========================
    TOP BAR
    ========================= */
-
 .topBar{
-  width:100%;                   /* ⬅️ يملأ العرض */
-  margin:0 0 10px;
+  display:grid;
+  grid-template-columns:260px 1fr 320px;
+  align-items:center;
+  gap:18px;
   background:var(--navy);
+  border-radius:24px;
+  padding:18px 22px;
+  min-height:110px;
+  box-shadow:var(--shadow);
+}
+
+.leftBtns{
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+}
+
+.smallBtn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  background:var(--yellow);
+  border:2px solid rgba(250,240,202,.75);
+  color:var(--navy);
+  text-decoration:none;
+  padding:14px 22px;
+  border-radius:18px;
+  font-weight:1000;
+  font-size:26px;
+  white-space:nowrap;
+}
+
+.logoCenter{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-width:0;
+}
+
+.headerLogo{
+  width:320px;
+  max-height:86px;
+  object-fit:contain;
+  display:block;
+}
+
+.turnWrap{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+}
+
+.turnPill{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  background:rgba(250,240,202,.08);
+  border:2px solid rgba(250,240,202,.65);
   color:var(--cream);
+  padding:14px 20px;
+  border-radius:18px;
+  white-space:nowrap;
+  font-size:26px;
+  font-weight:1000;
+}
+
+.turnBtn{
+  border:none;
+  background:transparent;
+  color:var(--cream);
+  width:34px;
+  height:34px;
+  display:grid;
+  place-items:center;
+  cursor:pointer;
+}
+
+/* =========================
+   BOARD
+   ========================= */
+.boardWrap{
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+  overflow:hidden;
+}
+
+.boardArea{
+  flex:1;
+  min-height:0;
+  overflow:hidden;
+}
+
+.board{
+  width:100%;
+  height:100%;
+  display:grid;
+  gap:18px;
+  align-items:start;
+}
+
+.categoryCard{
+  width:100%;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.catMedia{
+  position:relative;
+  background:var(--cream);
+  border:3px solid var(--navy);
+  border-radius:18px;
+  overflow:hidden;
+  padding:6px;
+  box-shadow:var(--shadow);
+}
+
+.catImg{
+  width:100%;
+  height:190px;
+  object-fit:cover;
+  border-radius:12px;
+  display:block;
+  background:var(--cream);
+}
+
+.catImgFallback{
+  width:100%;
+  height:190px;
+  border-radius:12px;
+  background:#efe3bf;
+}
+
+.catNameOverlay{
+  position:absolute;
+  left:10px;
+  right:10px;
+  bottom:10px;
+  background:rgba(250,240,202,.96);
+  border:2px solid var(--navy);
+  border-radius:12px;
+  min-height:52px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  padding:6px 8px;
+  box-shadow:0 6px 16px rgba(0,0,0,.10);
+}
+
+.catName{
+  color:var(--navy);
+  font-size:24px;
+  font-weight:1000;
+  line-height:1.15;
+}
+
+.pointsRow{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+
+.cell{
+  width:100%;
+  height:72px;
   border-radius:16px;
+  font-weight:1000;
+  font-size:30px;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  transition:transform .12s ease, opacity .12s ease;
+  box-shadow:var(--shadow);
+}
+
+.cell:not(:disabled):hover{
+  transform:translateY(-1px);
+}
+
+.cell:disabled{
+  cursor:not-allowed;
+}
+
+.cellValue{
+  line-height:1;
+}
+
+.pts200,
+.pts600{
+  background:var(--yellow);
+  color:var(--navy);
+  border:3px solid var(--navy);
+}
+
+.pts400{
+  background:var(--blueSoft);
+  color:var(--navy);
+  border:3px solid var(--navy);
+}
+
+.used{
+  opacity:.32;
+  filter:grayscale(.1);
+}
+
+/* =========================
+   TEAMS BAR
+   ========================= */
+.teamsBar{
+  flex-shrink:0;
+  background:var(--yellow);
+  border:3px solid var(--navy);
+  border-radius:20px;
+  padding:12px 14px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.teamsMain{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) 130px minmax(0, 1fr);
+  gap:14px;
+  align-items:stretch;
+}
+
+.teamsCenterLogo{
+  width:130px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding-inline:8px;
+}
+
+.teamsLogo{
+  width:100%;
+  max-width:110px;
+  max-height:84px;
+  object-fit:contain;
+  display:block;
+}
+
+.extraTeamsRow{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
+  gap:12px;
+}
+
+.teamCard{
+  background:rgba(13,59,102,.10);
+  border:2px solid var(--navy);
+  border-radius:18px;
+  min-height:122px;
+  padding:12px 16px;
+  display:flex;
+  align-items:center;
+  gap:14px;
+  color:var(--navy);
+  min-width:0;
+}
+
+.teamActive{
+  outline:3px solid rgba(13,59,102,.35);
+  outline-offset:-2px;
+}
+
+.teamManualCol{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  flex:0 0 auto;
+}
+
+.scoreBtn{
+  width:42px;
+  height:42px;
+  border-radius:12px;
+  border:2px solid var(--navy);
+  background:var(--cream);
+  color:var(--navy);
+  display:grid;
+  place-items:center;
+  cursor:pointer;
+  padding:0;
+}
+
+.teamAvatar{
+  width:78px;
+  height:78px;
+  min-width:78px;
+  border-radius:999px;
+  background:var(--cream);
+  border:4px solid var(--navy);
+  display:grid;
+  place-items:center;
+  color:var(--navy);
+}
+
+.teamCenter{
+  flex:1;
+  min-width:0;
+}
+
+.teamName{
+  font-size:34px;
+  font-weight:1000;
+  line-height:1.1;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.teamScoreLine{
+  margin-top:10px;
+  font-size:28px;
+  font-weight:1000;
+}
+
+.teamScoreNum{
+  font-weight:1000;
+}
+
+/* =========================
+   ROUND END MODAL
+   ========================= */
+.roundBackdrop{
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  background:rgba(13,59,102,.55);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+}
+
+.roundCard{
+  width:min(720px, 100%);
+  background:rgba(250,240,202,.97);
+  border:2px solid rgba(13,59,102,.14);
+  border-radius:22px;
+  box-shadow:0 28px 80px rgba(13,59,102,.35);
+  padding:18px;
+  direction:rtl;
+  color:var(--navy);
+}
+
+.roundHeader{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-bottom:14px;
+}
+
+.roundBadge{
+  width:52px;
+  height:52px;
+  border-radius:18px;
+  display:grid;
+  place-items:center;
+  background:var(--yellow);
+  border:2px solid rgba(13,59,102,.12);
+  font-size:26px;
+}
+
+.roundTitle{
+  font-weight:1000;
+  font-size:22px;
+  line-height:1.2;
+}
+
+.roundSub{
+  margin-top:4px;
+  opacity:.78;
+  font-weight:800;
+  font-size:14px;
+}
+
+.roundWinners{
+  display:grid;
+  gap:10px;
+  margin-top:10px;
+}
+
+.winnerChip{
+  background:rgba(255,255,255,.85);
+  border:2px solid rgba(13,59,102,.12);
+  border-radius:18px;
   padding:12px 14px;
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:12px;
-  box-shadow:var(--shadow);
-  flex-shrink:0;
 }
 
-.leftBtns{
-  display:flex;
-  gap:10px;
+.winnerName{
+  font-weight:1000;
+  font-size:18px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
-.smallBtn{
-  background:rgba(250,240,202,.12);
-  border:1px solid rgba(250,240,202,.25);
-  color:var(--cream);
-  text-decoration:none;
-  padding:8px 12px;
-  border-radius:12px;
-  font-weight:900;
-  cursor:pointer;
-}
-
-.centerTitle{
-  font-weight:900;
-  font-size:20px;
-}
-
-.turnPill{
-  background:rgba(250,240,202,.12);
-  border:1px solid rgba(250,240,202,.25);
-  padding:8px 12px;
+.winnerScore{
+  font-weight:1000;
+  background:var(--yellow);
+  border:1px solid rgba(13,59,102,.12);
+  padding:6px 10px;
   border-radius:999px;
-  display:flex;
-  gap:8px;
-  align-items:center;
-  font-weight:800;
+  min-width:72px;
+  text-align:center;
 }
 
-/* =========================
-   BOARD WRAP
-   ========================= */
-
-.boardWrap{
-  width:100%;
-  flex:1;                      /* ⬅️ يملأ المساحة المتبقية */
-  display:flex;
-  flex-direction:column;
-  gap:10px;
-  overflow:hidden;             /* 🔒 لا تمرير */
+.roundHint{
+  margin-top:12px;
+  padding:10px 12px;
+  border-radius:16px;
+  background:rgba(13,59,102,.06);
+  border:1px solid rgba(13,59,102,.12);
+  font-weight:900;
+  text-align:center;
 }
 
-/* =========================
-   BOARD GRID
-   ========================= */
-
-.board{
+.roundActions{
+  margin-top:14px;
   display:grid;
   gap:10px;
-  background:white;
-  padding:10px;
+}
+
+.roundBtnPrimary{
+  height:52px;
   border-radius:16px;
   border:2px solid rgba(13,59,102,.12);
-  box-shadow:0 10px 25px rgba(0,0,0,.08);
-
-  flex:1;                      /* ⬅️ الشبكة تتمدد */
-  min-height:0;                /* مهم جداً */
-}
-
-/* =========================
-   CATEGORY HEADER
-   ========================= */
-
-.catHeader{
-  background:rgba(13,59,102,.06);
-  border:2px solid rgba(13,59,102,.10);
-  border-radius:14px;
-  padding:8px;
-  text-align:center;
-  font-weight:900;
+  background:var(--yellow);
   color:var(--navy);
-}
-
-/* =========================
-   CELLS
-   ========================= */
-
-.cell{
-  height:60px;
-  border-radius:14px;
-  border:2px solid rgba(13,59,102,.12);
-  background:rgba(13,59,102,.08);
-  color:var(--navy);
-  font-weight:900;
-  font-size:18px;
+  font-weight:1000;
   cursor:pointer;
 }
 
-.used{
-  opacity:.35;
-  cursor:not-allowed;
+.roundBtnSecondary{
+  height:52px;
+  border-radius:16px;
+  border:2px solid rgba(13,59,102,.14);
+  background:rgba(13,59,102,.10);
+  color:var(--navy);
+  font-weight:1000;
+  cursor:pointer;
 }
 
-/* =========================
-   TEAMS BAR (BOTTOM)
-   ========================= */
-
-.teamsBar{
-  flex-shrink:0;               /* ⬅️ لا ينقص ارتفاعه */
-  display:grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap:10px;
-}
-
-.teamCard{
-  background:var(--navy);
-  color:var(--cream);
-  border-radius:14px;
-  padding:10px 12px;
-  border:2px solid rgba(250,240,202,.18);
-  box-shadow:0 10px 25px rgba(0,0,0,.10);
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  font-weight:900;
-}
-
-.teamScore{
-  background:rgba(250,240,202,.15);
-  border:1px solid rgba(250,240,202,.25);
-  padding:6px 10px;
-  border-radius:12px;
-  min-width:52px;
-  text-align:center;
-}
-
-/* =========================
-   MOBILE
-   ========================= */
-
-@media (max-width: 760px){
-  .centerTitle{ display:none; }
-
-  .cell{
-    height:52px;
-    font-size:16px;
-  }
-
-  .teamCard{
-    padding:8px 10px;
-  }
-}
-
-/* =========================
-   END GAME OVERLAY (UNCHANGED)
-   ========================= */
-
-.endOverlay{
-  position:fixed;
-  inset:0;
-  background:rgba(13,59,102,.72);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:18px;
-  z-index:9999;
+.roundBtnGhost{
+  height:46px;
+  border-radius:16px;
+  border:2px solid rgba(13,59,102,.10);
+  background:rgba(255,255,255,.55);
+  color:var(--navy);
+  font-weight:1000;
+  cursor:pointer;
 }

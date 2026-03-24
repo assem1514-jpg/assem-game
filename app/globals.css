@@ -1,11 +1,97 @@
-.page {
-  font-family: 'Tajawal', sans-serif;
-  background: #f7f7f7;
-  min-height: 100vh;
+/* app/globals.css */
+
+/* ========== Base / Reset ========== */
+:root{
+  --navy:#0D3B66;
+  --cream:#FAF0CA;
+  --yellow:#F4D35E;
+
+  /* ظلال بدون أسود (كحلي) */
+  --shadow: 0 18px 60px rgba(13,59,102,.22);
+  --shadowSoft: 0 10px 30px rgba(13,59,102,.16);
+
+  --radius: 20px;
+
+  /* Safe area (iPhone notch) */
+  --safe-top: env(safe-area-inset-top);
+  --safe-bottom: env(safe-area-inset-bottom);
+  --safe-left: env(safe-area-inset-left);
+  --safe-right: env(safe-area-inset-right);
+
+  /* Responsive scale */
+  --ui-gap: clamp(10px, 1.2vw, 18px);
+  --ui-pad: clamp(12px, 1.4vw, 22px);
+  --ui-font: clamp(14px, 1.1vw, 18px);
+  --ui-font-lg: clamp(18px, 1.6vw, 26px);
+  --ui-btn-h: clamp(44px, 4.4vh, 72px);
 }
 
+*,
+*::before,
+*::after{
+  box-sizing: border-box;
+}
+
+/* مهم لقياسات الشاشة داخل iOS */
+html, body{
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* الجسم */
+body{
+  font-family: 'Tajawal', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background: var(--navy);
+  overflow-x: hidden;
+
+  -webkit-text-size-adjust: 100%;
+
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+/* لمنع أي عنصر يطلع خارج الشاشة */
+img, video{
+  max-width: 100%;
+  height: auto;
+}
+
+/* ========== Utilities (Global classes) ========== */
+
+/* ❌ حذفنا :global لأنها غير مسموحة هنا */
+
+.fullscreen{
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.bg-cover{
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+.container{
+  width: min(1280px, 100%);
+  margin: 0 auto;
+  padding-inline: var(--ui-pad);
+}
+
+/* ========== Existing Styles ========== */
+
 /* Top bar */
-.top-bar {
+.top-bar{
   background: linear-gradient(90deg, #6a00a8, #8e2de2);
   color: white;
   padding: 16px;
@@ -15,7 +101,8 @@
   border-radius: 0 0 16px 16px;
 }
 
-.back-btn {
+/* Buttons */
+.back-btn{
   background: #ff4d6d;
   border: none;
   color: white;
@@ -25,19 +112,21 @@
 }
 
 /* Sections */
-.section {
+.section{
   padding: 24px;
   text-align: center;
 }
 
-.filters {
+/* Filters */
+.filters{
   display: flex;
   justify-content: center;
   gap: 12px;
   margin: 16px 0;
+  flex-wrap: wrap;
 }
 
-.filter {
+.filter{
   padding: 10px 18px;
   border-radius: 12px;
   border: none;
@@ -45,12 +134,12 @@
   font-weight: bold;
 }
 
-.filter.active {
+.filter.active{
   background: #ffd60a;
 }
 
 /* Buttons */
-.primary {
+.primary{
   background: #6a00a8;
   color: white;
   padding: 14px 24px;
@@ -59,7 +148,7 @@
   font-size: 16px;
 }
 
-.secondary {
+.secondary{
   background: #ff4d6d;
   color: white;
   padding: 12px;
@@ -69,7 +158,7 @@
   margin-top: 12px;
 }
 
-.start {
+.start{
   background: #ffd60a;
   padding: 16px;
   border-radius: 16px;
@@ -80,14 +169,17 @@
 }
 
 /* Teams */
-.teams {
+.teams{
   background: #ff4d6d;
   padding: 24px;
   border-radius: 24px 24px 0 0;
   color: white;
+
+  margin-top: auto;
+  padding-bottom: calc(24px + var(--safe-bottom));
 }
 
-.input {
+.input{
   width: 100%;
   padding: 14px;
   border-radius: 12px;
@@ -95,10 +187,9 @@
   margin-bottom: 12px;
   font-size: 16px;
 }
-:root{
-  --navy:#0D3B66;
-  --cream:#FAF0CA;
-  --yellow:#F4D35E;
-  --shadow: 0 18px 60px rgba(0,0,0,.18);
-  --radius: 20px;
+
+/* تحسينات للجوال */
+@media (max-width: 480px){
+  .section{ padding: 16px; }
+  .top-bar{ padding: 12px; }
 }

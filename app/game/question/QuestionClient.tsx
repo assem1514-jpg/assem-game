@@ -1,4 +1,3 @@
-// app/game/question/QuestionClient.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -6,13 +5,28 @@ import { useSearchParams, useRouter } from "next/navigation";
 import styles from "./page.module.css";
 
 import { db } from "@/lib/firebase";
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import {
+  collection,
+  collectionGroup,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  serverTimestamp,
+  query,
+  where,
+  limit,
+  updateDoc,
+} from "firebase/firestore";
 import { Icon } from "@iconify/react";
+import { useAuth } from "@/lib/authContext";
 
 type Team = { name: string; score: number; icon?: string };
 
 const LS_KEY = "assem_game_v1";
 const DEFAULT_SECONDS = 60;
+const STAGE_W = 1600;
+const STAGE_H = 900;
 
 function loadGame() {
   if (typeof window === "undefined") return null;
@@ -43,9 +57,9 @@ type QuestionDoc = {
   imageUrl?: string;
   answerText?: string;
   answerImageUrl?: string;
-
-  // ✅ اول حرف (من الأدمن)
   answerFirstLetter?: string;
+  _id?: string;
+  _catId?: string;
 };
 
 type Lifelines = {
@@ -81,41 +95,143 @@ function formatMMSS(totalSeconds: number) {
   return `${mm}:${ss}`;
 }
 
+function pickRandom<T>(arr: T[]) {
+  if (!arr.length) return null;
+  const i = Math.floor(Math.random() * arr.length);
+  return arr[i] ?? null;
+}
+
+function parseCatIdFromQuestionPath(path: string) {
+  const parts = (path || "").split("/");
+  const i = parts.findIndex((p) => p === "categories");
+  if (i >= 0 && parts[i + 1]) return parts[i + 1];
+  return "";
+}
+
 export default function QuestionPage() {
   const router = useRouter();
   const sp = useSearchParams();
+  const { user } = useAuth();
 
   const catId = sp.get("cat") || "";
   const pts = Number(sp.get("pts") || 0);
   const idx = Number(sp.get("idx") || 0);
-  const qid = sp.get("qid") || "";
   const catsParam = normalizeCatsParam(sp.get("cats") || "");
+  const sessionCode = (sp.get("session") || "").trim().toUpperCase();
 
-  const [game, setGame] = useState(() => loadGame());
+  const [game, setGame] = useState<any | null>(null);
   const [showAnswer, setShowAnswer] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [question, setQuestion] = useState<QuestionDoc | null>(null);
 
-  // ✅ اسم الفئة الحقيقي بدل الرمز
   const [catName, setCatName] = useState<string>("");
 
-  // ✅ مؤقت
   const [secondsLeft, setSecondsLeft] = useState<number>(DEFAULT_SECONDS);
   const [timerRunning, setTimerRunning] = useState<boolean>(false);
 
-  // ✅ إظهار أول حرف (حسب الفريق)
-  const [revealedLetterForTeam, setRevealedLetterForTeam] = useState<Record<number, string>>({});
+  const [openHelp, setOpenHelp] = useState(false);
+  const [activeLifelines, setActiveLifelines] = useState<{ twoAnswers: boolean; callFriend: boolean }>({
+    twoAnswers: false,
+    callFriend: false,
+  });
 
-  // ✅ تفعيل المساعدة "لهذا السؤال فقط" (بدون ما تنتقل للسؤال اللي بعده)
-  const [activeLifelines, setActiveLifelines] = useState<{ twoAnswers: boolean; firstLetter: boolean; callFriend: boolean }>(
-    { twoAnswers: false, firstLetter: false, callFriend: false }
-  );
+  const [openImage, setOpenImage] = useState(false);
+  const [openWinners, setOpenWinners] = useState(false);
+
+  const [viewport, setViewport] = useState({ w: 0, h: 0 });
+  const [sessionDocId, setSessionDocId] = useState<string>("");
+
+  async function persistGame(updatedGame: any) {
+    saveGame(updatedGame);
+    setGame(updatedGame);
+
+    if (sessionDocId) {
+      try {
+        await updateDoc(doc(db, "sessions", sessionDocId), {
+          gameData: updatedGame,
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initGame() {
+      let initialGame: any | null = null;
+      let foundSessionDocId = "";
+
+      if (sessionCode) {
+        try {
+          const q = query(
+            collection(db, "sessions"),
+            where("code", "==", sessionCode),
+            where("isActive", "==", true),
+            limit(1)
+          );
+
+          const snap = await getDocs(q);
+
+          if (!snap.empty) {
+            foundSessionDocId = snap.docs[0].id;
+            const sessionData = snap.docs[0].data() as any;
+            const expiresAt = Number(sessionData?.expiresAt ?? 0);
+
+            if (expiresAt && Date.now() <= expiresAt && sessionData?.gameData) {
+              initialGame = sessionData.gameData;
+              saveGame(initialGame);
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      if (!initialGame) {
+        initialGame = loadGame();
+      }
+
+      if (!cancelled) {
+        setSessionDocId(foundSessionDocId);
+        setGame(initialGame);
+      }
+    }
+
+    initGame();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionCode]);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      setViewport({ w: window.innerWidth, h: window.innerHeight });
+    };
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    window.addEventListener("orientationchange", updateViewport);
+    return () => {
+      window.removeEventListener("resize", updateViewport);
+      window.removeEventListener("orientationchange", updateViewport);
+    };
+  }, []);
+
+  const stageScale = useMemo(() => {
+    if (!viewport.w || !viewport.h) return 1;
+    const pad = 12;
+    const availableW = Math.max(0, viewport.w - pad * 2);
+    const availableH = Math.max(0, viewport.h - pad * 2);
+    return Math.min(availableW / STAGE_W, availableH / STAGE_H);
+  }, [viewport]);
 
   const currentTeamIndex = Number(game?.turnIndex ?? 0);
   const currentTeam: Team | undefined = game?.teams?.[currentTeamIndex];
+  const packId = (game?.packId || "main").toString();
 
-  // ✅ جلب اسم الفئة
   useEffect(() => {
     let cancelled = false;
 
@@ -124,9 +240,8 @@ export default function QuestionPage() {
         setCatName("");
         return;
       }
-
       try {
-        const ref = doc(db, "packs", "main", "categories", catId);
+        const ref = doc(db, "packs", packId, "categories", catId);
         const snap = await getDoc(ref);
         if (!cancelled) {
           if (snap.exists()) {
@@ -145,14 +260,13 @@ export default function QuestionPage() {
     return () => {
       cancelled = true;
     };
-  }, [catId]);
+  }, [catId, packId]);
 
-  // ✅ جلب السؤال
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      if (!catId || !pts) {
+      if (!catId || !pts || !game) {
         setQuestion(null);
         setLoading(false);
         return;
@@ -160,59 +274,121 @@ export default function QuestionPage() {
 
       setLoading(true);
       setShowAnswer(false);
-      setRevealedLetterForTeam({});
+      setOpenHelp(false);
+      setOpenImage(false);
+      setOpenWinners(false);
+
       setSecondsLeft(DEFAULT_SECONDS);
       setTimerRunning(false);
-
-      // ✅ مهم: أي "تفعيل" للمساعدة يكون لسؤال واحد فقط
-      setActiveLifelines({ twoAnswers: false, firstLetter: false, callFriend: false });
+      setActiveLifelines({ twoAnswers: false, callFriend: false });
 
       try {
-        let found: QuestionDoc | null = null;
+        const allSnap = await getDocs(collection(db, "packs", packId, "categories", catId, "questions"));
 
-        if (qid) {
-          const ref = doc(db, "packs", "main", "categories", catId, "questions", qid);
-          const snap = await getDoc(ref);
-          if (snap.exists()) {
-            const data = snap.data() as any;
-            const p = Number(data.points ?? 0);
+        const allCandidates: QuestionDoc[] = [];
+        allSnap.forEach((d) => {
+          const data = d.data() as any;
+          const p = Number(data.points ?? 0);
+          if (p !== pts) return;
 
-            found = {
-              text: data.text ?? "",
-              points: p || pts,
-              imageUrl: data.imageUrl ?? "",
-              answerText: data.answerText ?? "",
-              answerImageUrl: data.answerImageUrl ?? "",
-              answerFirstLetter:
-                (data.answerFirstLetter ?? data.firstLetter ?? data.answerLetter ?? data.firstChar ?? "")?.toString() ?? "",
-            };
+          allCandidates.push({
+            _id: d.id,
+            _catId: catId,
+            text: data.text ?? "",
+            points: p,
+            imageUrl: data.imageUrl ?? "",
+            answerText: data.answerText ?? "",
+            answerImageUrl: data.answerImageUrl ?? "",
+            answerFirstLetter:
+              (data.answerFirstLetter ?? data.firstLetter ?? data.answerLetter ?? data.firstChar ?? "")?.toString() ?? "",
+          });
+        });
+
+        const localSeen: Record<string, true> = game?.seenQuestions || {};
+        const localSeenKeyPrefix = `${packId}:${catId}:${pts}:`;
+        const localSeenIds = new Set(
+          Object.keys(localSeen)
+            .filter((k) => k.startsWith(localSeenKeyPrefix))
+            .map((k) => k.split(":").slice(-1)[0])
+        );
+
+        let userSeenIds = new Set<string>();
+        if (user?.uid) {
+          try {
+            const qs = query(
+              collection(db, "users", user.uid, "seenQuestions"),
+              where("packId", "==", packId),
+              where("catId", "==", catId),
+              where("points", "==", pts)
+            );
+            const seenSnap = await getDocs(qs);
+            seenSnap.forEach((sd) => {
+              const dd = sd.data() as any;
+              if (dd?.qid) userSeenIds.add(String(dd.qid));
+            });
+          } catch {
+            try {
+              const seenSnap = await getDocs(collection(db, "users", user.uid, "seenQuestions"));
+              seenSnap.forEach((sd) => {
+                const dd = sd.data() as any;
+                if (dd?.packId === packId && dd?.catId === catId && Number(dd?.points ?? 0) === pts) {
+                  if (dd?.qid) userSeenIds.add(String(dd.qid));
+                }
+              });
+            } catch {}
           }
         }
 
-        if (!found) {
-          const snap = await getDocs(collection(db, "packs", "main", "categories", catId, "questions"));
-          snap.forEach((d) => {
-            if (found) return;
-            const data = d.data() as any;
-            const p = Number(data.points ?? 0);
-            if (p !== pts) return;
+        const filtered = allCandidates.filter((c) => {
+          const id = c._id || "";
+          if (!id) return false;
+          if (localSeenIds.has(id)) return false;
+          if (userSeenIds.has(id)) return false;
+          return true;
+        });
 
-            found = {
-              text: data.text ?? "",
-              points: p,
-              imageUrl: data.imageUrl ?? "",
-              answerText: data.answerText ?? "",
-              answerImageUrl: data.answerImageUrl ?? "",
-              answerFirstLetter:
-                (data.answerFirstLetter ?? data.firstLetter ?? data.answerLetter ?? data.firstChar ?? "")?.toString() ?? "",
-            };
+        let chosen = pickRandom(filtered);
+
+        if (!chosen) {
+          const filteredLocalOnly = allCandidates.filter((c) => {
+            const id = c._id || "";
+            if (!id) return false;
+            if (localSeenIds.has(id)) return false;
+            return true;
           });
+          chosen = pickRandom(filteredLocalOnly) || pickRandom(allCandidates);
+        }
+
+        if (!chosen) {
+          if (!cancelled) {
+            setQuestion(null);
+            setLoading(false);
+          }
+          return;
         }
 
         if (!cancelled) {
-          setQuestion(found);
+          const updated = { ...(game || {}) };
+          updated.seenQuestions = updated.seenQuestions || {};
+          updated.seenQuestions[`${localSeenKeyPrefix}${chosen._id}`] = true;
+          await persistGame(updated);
+        }
+
+        if (user?.uid && chosen._id) {
+          try {
+            const seenId = `${catId}_${pts}_${chosen._id}`;
+            await setDoc(
+              doc(db, "users", user.uid, "seenQuestions", seenId),
+              { packId, catId, qid: chosen._id, points: pts, seenAt: serverTimestamp() },
+              { merge: true }
+            );
+          } catch {}
+        }
+
+        if (!cancelled) {
+          setQuestion(chosen);
           setLoading(false);
-          if (found) setTimerRunning(true);
+          setTimerRunning(true);
         }
       } catch (e) {
         console.error(e);
@@ -226,9 +402,8 @@ export default function QuestionPage() {
     return () => {
       cancelled = true;
     };
-  }, [catId, pts, qid]);
+  }, [catId, pts, user?.uid, packId, game?.startedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ✅ تشغيل المؤقت
   useEffect(() => {
     if (!timerRunning) return;
     if (showAnswer) return;
@@ -241,24 +416,20 @@ export default function QuestionPage() {
     return () => clearInterval(t);
   }, [timerRunning, showAnswer, question]);
 
-  // ✅ إذا انتهى الوقت: يوقف المؤقت فقط (بدون إظهار الجواب تلقائيًا)
   useEffect(() => {
     if (!question) return;
     if (showAnswer) return;
-
-    if (secondsLeft === 0) {
-      setTimerRunning(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (secondsLeft === 0) setTimerRunning(false);
   }, [secondsLeft, question, showAnswer]);
 
   const catTitle = useMemo(() => ((catName || "").trim() ? catName : "…"), [catName]);
 
   function backToBoard() {
-    router.push(`/game?cats=${encodeURIComponent(catsParam)}`);
+    const sessionPart = sessionCode ? `&session=${encodeURIComponent(sessionCode)}` : "";
+    router.push(`/game?cats=${encodeURIComponent(catsParam)}${sessionPart}`);
   }
 
-  function markUsed(updatedGame: any, advanceTurn: boolean) {
+  async function markUsed(updatedGame: any, advanceTurn: boolean) {
     updatedGame.used = updatedGame.used || {};
     updatedGame.used[`${catId}:${pts}:${idx}`] = true;
 
@@ -267,89 +438,148 @@ export default function QuestionPage() {
       if (n > 0) updatedGame.turnIndex = ((updatedGame.turnIndex ?? 0) + 1) % n;
     }
 
-    saveGame(updatedGame);
-    setGame(updatedGame);
+    await persistGame(updatedGame);
   }
 
-  function markUsedAndBack(updatedGame: any) {
-    markUsed(updatedGame, true);
+  async function markUsedAndBack(updatedGame: any) {
+    await markUsed(updatedGame, true);
     backToBoard();
   }
 
-  function awardToTeam(teamIndex: number) {
+  async function awardToTeam(teamIndex: number) {
     if (!game) return;
     const updated = { ...game };
-    updated.teams = (updated.teams || []).map((t: Team, i: number) => (i === teamIndex ? { ...t, score: (t.score || 0) + pts } : t));
-    markUsedAndBack(updated);
+    updated.teams = (updated.teams || []).map((t: Team, i: number) =>
+      i === teamIndex ? { ...t, score: (t.score || 0) + pts } : t
+    );
+    setOpenWinners(false);
+    await markUsedAndBack(updated);
   }
 
-  function nobodyAnswered() {
+  async function nobodyAnswered() {
     if (!game) return;
     const updated = { ...game };
-    markUsedAndBack(updated);
+    setOpenWinners(false);
+    await markUsedAndBack(updated);
   }
 
-  function showAnswerNow() {
+  async function showAnswerNow() {
     if (!game) return;
     setShowAnswer(true);
     setTimerRunning(false);
 
     const updated = { ...game };
-    markUsed(updated, false);
+    await markUsed(updated, false);
   }
 
   function backToQuestionView() {
     setShowAnswer(false);
+    setOpenWinners(false);
     if (question && secondsLeft > 0) setTimerRunning(true);
   }
 
-  function useTwoAnswers() {
+  async function useTwoAnswers() {
     if (!game) return;
     const updated = { ...game };
     setLifelines(updated, currentTeamIndex, { twoAnswers: true });
-    saveGame(updated);
-    setGame(updated);
-
-    // ✅ يتفعّل لهذا السؤال فقط
+    await persistGame(updated);
     setActiveLifelines((p) => ({ ...p, twoAnswers: true }));
   }
 
-  function useFirstLetter() {
-    if (!game || !question) return;
-
-    const letter = (question.answerFirstLetter || "").trim();
-    const updated = { ...game };
-    setLifelines(updated, currentTeamIndex, { firstLetter: true });
-    saveGame(updated);
-    setGame(updated);
-
-    // ✅ يتفعّل لهذا السؤال فقط
-    setActiveLifelines((p) => ({ ...p, firstLetter: true }));
-
-    setRevealedLetterForTeam((p) => ({
-      ...p,
-      [currentTeamIndex]: letter || "—",
-    }));
-  }
-
-  function useCallFriend() {
+  async function useCallFriend() {
     if (!game) return;
     const updated = { ...game };
     setLifelines(updated, currentTeamIndex, { callFriend: true });
-    saveGame(updated);
-    setGame(updated);
-
-    // ✅ يتفعّل لهذا السؤال فقط
+    await persistGame(updated);
     setActiveLifelines((p) => ({ ...p, callFriend: true }));
   }
 
-  // ✅ أزرار المؤقت (شكل الصورة: pause + reset)
+  async function changeQuestionAny() {
+    if (!pts) return;
+    try {
+      setLoading(true);
+      setShowAnswer(false);
+      setOpenImage(false);
+      setOpenWinners(false);
+      setSecondsLeft(DEFAULT_SECONDS);
+      setTimerRunning(false);
+
+      const qRef = query(collectionGroup(db, "questions"), where("points", "==", pts), limit(60));
+      const snap = await getDocs(qRef);
+
+      const pool: QuestionDoc[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as any;
+        const qid2 = d.id;
+        const catId2 = parseCatIdFromQuestionPath(d.ref.path);
+
+        pool.push({
+          _id: qid2,
+          _catId: catId2,
+          text: data.text ?? "",
+          points: Number(data.points ?? pts),
+          imageUrl: data.imageUrl ?? "",
+          answerText: data.answerText ?? "",
+          answerImageUrl: data.answerImageUrl ?? "",
+          answerFirstLetter:
+            (data.answerFirstLetter ?? data.firstLetter ?? data.answerLetter ?? data.firstChar ?? "")?.toString() ?? "",
+        });
+      });
+
+      const picked = pickRandom(pool);
+
+      if (!picked) {
+        alert("ما لقيت سؤال بنفس النقاط.");
+        setLoading(false);
+        return;
+      }
+
+      if (picked._catId) {
+        try {
+          const cSnap = await getDoc(doc(db, "packs", packId, "categories", picked._catId));
+          if (cSnap.exists()) {
+            const cd = cSnap.data() as any;
+            const name = (cd?.name ?? cd?.title ?? cd?.catName ?? "").toString().trim();
+            setCatName(name || "");
+          }
+        } catch {}
+      }
+
+      const updated = { ...(game || {}) };
+      updated.seenQuestions = updated.seenQuestions || {};
+      const prefix = `${packId}:${picked._catId || "any"}:${pts}:`;
+      if (picked._id) updated.seenQuestions[`${prefix}${picked._id}`] = true;
+      await persistGame(updated);
+
+      if (user?.uid && picked._id) {
+        try {
+          const seenId = `${picked._catId || "any"}_${pts}_${picked._id}`;
+          await setDoc(
+            doc(db, "users", user.uid, "seenQuestions", seenId),
+            { packId, catId: picked._catId || "any", qid: picked._id, points: pts, seenAt: serverTimestamp() },
+            { merge: true }
+          );
+        } catch {}
+      }
+
+      setQuestion(picked);
+      setLoading(false);
+      setTimerRunning(true);
+      setOpenHelp(false);
+    } catch (e) {
+      console.error(e);
+      alert("صار خطأ أثناء تغيير السؤال");
+      setLoading(false);
+    }
+  }
+
   function toggleTimer() {
     if (!question) return;
     if (showAnswer) return;
     if (secondsLeft === 0) return;
     setTimerRunning((v) => !v);
   }
+
   function resetTimer() {
     if (!question) return;
     if (showAnswer) return;
@@ -359,8 +589,17 @@ export default function QuestionPage() {
 
   if (!game) {
     return (
-      <div className={styles.page} style={{ padding: 24 }}>
-        ما فيه لعبة شغالة. ارجع للفئات وابدأ لعبة جديدة.
+      <div className={styles.page}>
+        <div className={styles.fitWrap}>
+          <div
+            className={styles.stageScale}
+            style={{ width: `${STAGE_W}px`, height: `${STAGE_H}px`, transform: `scale(${stageScale})` }}
+          >
+            <div className={styles.stage} style={{ display: "grid", placeItems: "center" }}>
+              ما فيه لعبة شغالة. ارجع للفئات وابدأ لعبة جديدة.
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -369,397 +608,262 @@ export default function QuestionPage() {
 
   return (
     <div className={styles.page}>
-      {/* الهيدر (لا تغيّر أزراره) */}
-      <header className={styles.topBar}>
-        <div className={styles.left}>
-          {!showAnswer ? (
-            <button className={styles.btn} onClick={backToBoard} type="button">
-              الرجوع للوحة
-            </button>
-          ) : (
-            <button className={styles.btn} onClick={backToQuestionView} type="button">
-              الرجوع للسؤال
-            </button>
-          )}
-        </div>
+      <div className={styles.fitWrap}>
+        <div
+          className={styles.stageScale}
+          style={{
+            width: `${STAGE_W}px`,
+            height: `${STAGE_H}px`,
+            transform: `scale(${stageScale})`,
+          }}
+        >
+          <div className={styles.stage}>
+            <header className={styles.fanousHeader}>
+              <div className={styles.turnPill}>
+                <span>دور الفريق:</span>
+                <b style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  {currentTeam?.icon ? renderTeamIcon(currentTeam.icon, 18) : null}
+                  {currentTeam?.name ?? "—"}
+                </b>
+              </div>
 
-        <div className={styles.center}>{showAnswer ? "الجواب" : "سؤال"}</div>
+              <div className={styles.brandCenter}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className={styles.bigLogo} src="/logo.png" alt="logo" />
+              </div>
 
-        <div className={styles.rightPill}>
-          <span>{catTitle}</span>
-          <b>{pts} نقطة</b>
-        </div>
-      </header>
+              <button className={styles.closeBtn} onClick={backToBoard} type="button" title="إغلاق">
+                ✕
+              </button>
+            </header>
 
-      <main className={styles.layout}>
-        {/* ====== مربع السؤال (نفس روح صورة المثال) ====== */}
-        <section className={styles.card} style={{ padding: 18 }}>
-          {loading ? (
-            <div className={styles.qTitle}>جاري التحميل…</div>
-          ) : !question ? (
-            <div className={styles.qTitle}>ما فيه سؤال بهذه النقاط داخل هذه الفئة.</div>
-          ) : (
-            <div
-              style={{
-                border: "4px solid rgba(13,59,102,.45)",
-                borderRadius: 18,
-                padding: 16,
-                position: "relative",
-                background: "white",
-              }}
-            >
-              {/* شريط علوي داخل الإطار: (الفئة يسار) (المؤقت بالنص) (النقاط يمين) */}
-              {!showAnswer ? (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr auto 1fr",
-                    alignItems: "center",
-                    gap: 12,
-                    marginBottom: 14,
-                  }}
-                >
-                  {/* يسار: اسم الفئة */}
-                  <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                    <div
-                      style={{
-                        background: "rgba(0,0,0,.85)",
-                        color: "white",
-                        padding: "10px 14px",
-                        borderRadius: 14,
-                        fontWeight: 900,
-                        minWidth: 120,
-                        textAlign: "center",
-                      }}
-                      title={catTitle}
-                    >
-                      {catTitle}
-                    </div>
-                  </div>
+            <main className={styles.mainWrap}>
+              <section className={styles.questionShell}>
+                <div className={styles.shellTopRow}>
+                  <div className={styles.pointsPill}>{pts} نقطة</div>
 
-                  {/* وسط: المؤقت + إيقاف/تشغيل + إعادة */}
-                  <div
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 12,
-                      background: "rgba(0,0,0,.85)",
-                      color: "white",
-                      padding: "10px 16px",
-                      borderRadius: 16,
-                      fontWeight: 900,
-                    }}
-                  >
+                  <div className={styles.timerPill}>
                     <button
                       type="button"
                       onClick={toggleTimer}
                       disabled={!question || showAnswer || secondsLeft === 0}
                       title={timerRunning ? "إيقاف" : "تشغيل"}
-                      style={{
-                        all: "unset",
-                        cursor: timerRunning ? "pointer" : "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: 28,
-                        height: 28,
-                        borderRadius: 10,
-                      }}
+                      className={styles.timerIconBtn}
                     >
                       <Icon icon={timerRunning ? "mdi:pause" : "mdi:play"} width="22" height="22" />
                     </button>
 
-                    <div style={{ fontSize: 18, letterSpacing: 0.5 }}>{formatMMSS(secondsLeft)}</div>
+                    <div className={styles.timerText}>{formatMMSS(secondsLeft)}</div>
 
                     <button
                       type="button"
                       onClick={resetTimer}
                       disabled={!question || showAnswer}
                       title="إعادة"
-                      style={{
-                        all: "unset",
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: 28,
-                        height: 28,
-                        borderRadius: 10,
-                      }}
+                      className={styles.timerIconBtn}
                     >
                       <Icon icon="mdi:restart" width="22" height="22" />
                     </button>
                   </div>
 
-                  {/* يمين: النقاط */}
-                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                    <div
-                      style={{
-                        background: "rgba(0,0,0,.85)",
-                        color: "white",
-                        padding: "10px 14px",
-                        borderRadius: 14,
-                        fontWeight: 900,
-                        minWidth: 120,
-                        textAlign: "center",
-                      }}
-                    >
-                      {pts} نقطة
+                  <button
+                    type="button"
+                    className={styles.fazaaBtn}
+                    onClick={() => setOpenHelp(true)}
+                    disabled={!question || showAnswer}
+                    title="فزعة ارتشاف"
+                  >
+                    فزعة ارتشاف
+                  </button>
+                </div>
+
+                <div className={styles.catTitleBar}>{catTitle}</div>
+
+                {loading ? (
+                  <div className={styles.qTitle}>جاري التحميل…</div>
+                ) : !question ? (
+                  <div className={styles.qTitle}>ما فيه سؤال بهذه النقاط داخل هذه الفئة.</div>
+                ) : !showAnswer ? (
+                  <div className={styles.qTitle}>{question.text}</div>
+                ) : (
+                  <div className={styles.qTitle} style={{ fontSize: 34 }}>
+                    {question.answerText || "—"}
+                  </div>
+                )}
+
+                <div className={styles.contentArea}>
+                  {!loading && question ? (
+                    !showAnswer ? (
+                      question.imageUrl ? (
+                        <div className={styles.mediaWrap}>
+                          <div className={styles.mediaSmall}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={question.imageUrl} alt="question" />
+                          </div>
+
+                          <button
+                            type="button"
+                            className={styles.zoomBtn}
+                            onClick={() => setOpenImage(true)}
+                            title="تكبير الصورة"
+                          >
+                            تكبير الصورة
+                          </button>
+                        </div>
+                      ) : (
+                        <div className={styles.emptyMedia}>بدون صورة</div>
+                      )
+                    ) : question.answerImageUrl ? (
+                      <div className={styles.mediaWrap}>
+                        <div className={styles.mediaSmall}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={question.answerImageUrl} alt="answer" />
+                        </div>
+
+                        <button
+                          type="button"
+                          className={styles.zoomBtn}
+                          onClick={() => setOpenImage(true)}
+                          title="تكبير الصورة"
+                        >
+                          تكبير الصورة
+                        </button>
+                      </div>
+                    ) : (
+                      <div className={styles.emptyMedia}>بدون صورة</div>
+                    )
+                  ) : null}
+                </div>
+
+                {!loading && question ? (
+                  !showAnswer ? (
+                    <div className={styles.bottomActions}>
+                      <button className={styles.backBtn} onClick={backToBoard} type="button">
+                        رجوع
+                      </button>
+
+                      <button className={styles.answerBtn} onClick={showAnswerNow} type="button">
+                        الإجابة
+                      </button>
                     </div>
-                  </div>
-                </div>
-              ) : null}
+                  ) : (
+                    <div className={styles.bottomActions}>
+                      <button className={styles.backBtn} onClick={backToQuestionView} type="button">
+                        الرجوع للسؤال
+                      </button>
 
-              {/* عنوان السؤال/الجواب */}
-              {!showAnswer ? (
-                <div className={styles.qTitle} style={{ marginBottom: 14 }}>
-                  {question.text}
-                </div>
-              ) : (
-                <div className={styles.qTitle} style={{ marginBottom: 14, fontSize: 22 }}>
-                  {question.answerText || "—"}
-                </div>
-              )}
+                      <button className={styles.whoBtn} onClick={() => setOpenWinners(true)} type="button">
+                        من جاوب صح؟
+                      </button>
+                    </div>
+                  )
+                ) : null}
+              </section>
+            </main>
 
-              {/* الصورة */}
-              {!showAnswer ? (
-                question.imageUrl ? (
-                  <div className={styles.media} style={{ minHeight: 280 }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={question.imageUrl} alt="question" />
+            {openHelp && (
+              <div className={styles.modalBackdrop} onClick={() => setOpenHelp(false)}>
+                <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+                  <div className={styles.modalTitle}>فزعة ارتشاف</div>
+                  <div className={styles.modalSub}>اختر وسيلة مساعدة (تتطبق على هذا السؤال فقط)</div>
+
+                  <div className={styles.helpGrid}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        useTwoAnswers();
+                        setOpenHelp(false);
+                      }}
+                      disabled={!question || showAnswer || lifelines.twoAnswers}
+                      className={styles.helpBtn}
+                    >
+                      <span>فعل إجابتين</span>
+                      <Icon icon="mdi:numeric-2-circle" width="22" height="22" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await changeQuestionAny();
+                      }}
+                      disabled={!question || showAnswer}
+                      className={styles.helpBtn}
+                    >
+                      <span>غيّر السؤال</span>
+                      <Icon icon="mdi:shuffle-variant" width="22" height="22" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        useCallFriend();
+                        setOpenHelp(false);
+                      }}
+                      disabled={!question || showAnswer || lifelines.callFriend}
+                      className={styles.helpBtn}
+                    >
+                      <span>اتصال بصديق</span>
+                      <Icon icon="mdi:phone" width="22" height="22" />
+                    </button>
                   </div>
-                ) : null
-              ) : question.answerImageUrl ? (
-                <div className={styles.media} style={{ minHeight: 280 }}>
+
+                  <button type="button" className={styles.modalCancel} onClick={() => setOpenHelp(false)}>
+                    إغلاق
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {openWinners && (
+              <div className={styles.modalBackdrop} onClick={() => setOpenWinners(false)}>
+                <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+                  <div className={styles.modalTitle}>الفريق اللي جاوب صح</div>
+                  <div className={styles.modalSub}>اختر الفريق اللي جاوب صح (أو محد جاوب)</div>
+
+                  <div className={styles.winnersGrid}>
+                    {(game?.teams || []).map((t: Team, i: number) => (
+                      <button
+                        key={i}
+                        className={styles.winnerBtn}
+                        onClick={() => awardToTeam(i)}
+                        type="button"
+                        disabled={!showAnswer || !question}
+                      >
+                        {t.icon ? <span style={{ marginInlineEnd: 8 }}>{renderTeamIcon(t.icon, 18)}</span> : null}
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button className={styles.nobodyBtnModal} onClick={nobodyAnswered} type="button" disabled={!question || !showAnswer}>
+                    محد جاوب
+                  </button>
+
+                  <button type="button" className={styles.modalCancel} onClick={() => setOpenWinners(false)}>
+                    إغلاق
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {openImage && question && (
+              <div className={styles.imageBackdrop} onClick={() => setOpenImage(false)}>
+                <div className={styles.imageFrame} onClick={(e) => e.stopPropagation()}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={question.answerImageUrl} alt="answer" />
-                </div>
-              ) : null}
-
-              {/* ✅ أول حرف يظهر فقط إذا تفعّل في "هذا السؤال" */}
-              {!showAnswer && activeLifelines.firstLetter ? (
-                <div
-                  style={{
-                    marginTop: 12,
-                    padding: "10px 12px",
-                    borderRadius: 14,
-                    border: "2px solid rgba(13,59,102,.10)",
-                    background: "rgba(13,59,102,.04)",
-                    fontWeight: 900,
-                    color: "var(--navy)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                  }}
-                >
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                    <Icon icon="mdi:alphabetical-variant" width="20" height="20" />
-                    أول حرف:
-                  </span>
-                  <span style={{ fontSize: 20 }}>
-                    {revealedLetterForTeam[currentTeamIndex] ?? (question.answerFirstLetter?.trim() || "—")}
-                  </span>
-                </div>
-              ) : null}
-
-              {/* زر الإجابة (نفس مكان/فكرة الصورة) + زر الرجوع */}
-              {!showAnswer ? (
-                <>
-                  <button
-                    className={styles.answerBtn}
-                    onClick={showAnswerNow}
-                    type="button"
-                    style={{
-                      position: "absolute",
-                      left: 16,
-                      bottom: 16,
-                      borderRadius: 16,
-                      padding: "14px 18px",
-                      minWidth: 120,
-                    }}
-                  >
-                    الإجابة
-                  </button>
-
-                  <button
-                    className={styles.backBtn}
-                    onClick={backToBoard}
-                    type="button"
-                    style={{
-                      position: "absolute",
-                      left: 16 + 140,
-                      bottom: 16,
-                      borderRadius: 16,
-                      padding: "14px 18px",
-                    }}
-                  >
-                    الرجوع للوحة
-                  </button>
-                </>
-              ) : (
-                <div className={styles.bottomRow} style={{ marginTop: 14 }}>
-                  <button className={styles.backBtn} onClick={backToQuestionView} type="button">
-                    الرجوع للسؤال
+                  <img
+                    src={!showAnswer ? (question.imageUrl || "") : (question.answerImageUrl || "")}
+                    alt="zoom"
+                    className={styles.imageFull}
+                  />
+                  <button type="button" className={styles.imageClose} onClick={() => setOpenImage(false)}>
+                    إغلاق
                   </button>
                 </div>
-              )}
-            </div>
-          )}
-        </section>
-
-        {/* ====== الجانب (لا تغيّر وسائل المساعدة) ====== */}
-        <aside className={styles.side}>
-          <div className={styles.sideTitle}>
-            دور الآن:{" "}
-            <span style={{ fontWeight: 900, display: "inline-flex", alignItems: "center", gap: 8 }}>
-              {currentTeam?.icon ? renderTeamIcon(currentTeam.icon, 18) : null}
-              <span>{currentTeam?.name ?? "—"}</span>
-            </span>
+              </div>
+            )}
           </div>
-
-          {/* ✅ وسائل المساعدة للفريق الحالي (لا تغيّرها) */}
-          <div
-            style={{
-              display: "grid",
-              gap: 10,
-              marginTop: 10,
-              padding: 12,
-              borderRadius: 16,
-              border: "2px solid rgba(13,59,102,.10)",
-              background: "rgba(13,59,102,.04)",
-            }}
-          >
-            <button
-              type="button"
-              onClick={useTwoAnswers}
-              disabled={!question || showAnswer || lifelines.twoAnswers}
-              title={lifelines.twoAnswers ? "تم استخدامها" : ""}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-                padding: "12px 12px",
-                borderRadius: 14,
-                border: "2px solid rgba(13,59,102,.12)",
-                background: "white",
-                fontWeight: 900,
-                color: "var(--navy)",
-                cursor: lifelines.twoAnswers ? "not-allowed" : "pointer",
-                opacity: lifelines.twoAnswers ? 0.5 : 1,
-              }}
-            >
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                <Icon icon="mdi:numeric-2-circle" width="22" height="22" />
-                فعل اجابتين
-              </span>
-              <span>{lifelines.twoAnswers ? "مستخدمة" : "استخدم"}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={useFirstLetter}
-              disabled={!question || showAnswer || lifelines.firstLetter}
-              title={lifelines.firstLetter ? "تم استخدامها" : ""}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-                padding: "12px 12px",
-                borderRadius: 14,
-                border: "2px solid rgba(13,59,102,.12)",
-                background: "white",
-                fontWeight: 900,
-                color: "var(--navy)",
-                cursor: lifelines.firstLetter ? "not-allowed" : "pointer",
-                opacity: lifelines.firstLetter ? 0.5 : 1,
-              }}
-            >
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                <Icon icon="mdi:alphabetical-variant" width="22" height="22" />
-                عطني أول حرف
-              </span>
-              <span>{lifelines.firstLetter ? "مستخدمة" : "استخدم"}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={useCallFriend}
-              disabled={!question || showAnswer || lifelines.callFriend}
-              title={lifelines.callFriend ? "تم استخدامها" : ""}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-                padding: "12px 12px",
-                borderRadius: 14,
-                border: "2px solid rgba(13,59,102,.12)",
-                background: "white",
-                fontWeight: 900,
-                color: "var(--navy)",
-                cursor: lifelines.callFriend ? "not-allowed" : "pointer",
-                opacity: lifelines.callFriend ? 0.5 : 1,
-              }}
-            >
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                <Icon icon="mdi:phone" width="22" height="22" />
-                اتصال بصديق
-              </span>
-              <span>{lifelines.callFriend ? "مستخدمة" : "استخدم"}</span>
-            </button>
-          </div>
-
-          <div className={styles.sideTitle} style={{ marginTop: 14 }}>
-            الفريق اللي جاوب صح
-          </div>
-
-          <div className={styles.teamBtns}>
-            {(game?.teams || []).map((t: Team, i: number) => (
-              <button
-                key={i}
-                className={styles.teamBtn}
-                onClick={() => awardToTeam(i)}
-                type="button"
-                disabled={!showAnswer || !question}
-                title={!showAnswer ? "اظهر الجواب أولًا" : ""}
-              >
-                {t.icon ? <span style={{ marginInlineEnd: 8 }}>{renderTeamIcon(t.icon, 18)}</span> : null}
-                {t.name}
-              </button>
-            ))}
-          </div>
-
-          <button
-            className={styles.nobodyBtn}
-            onClick={nobodyAnswered}
-            type="button"
-            disabled={!question || !showAnswer}
-            title={!showAnswer ? "اظهر الجواب أولًا" : ""}
-          >
-            محد جاوب
-          </button>
-
-          {/* شعارك داخل المشروع: public/logo.png */}
-          <div style={{ marginTop: 14, display: "flex", justifyContent: "center" }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/logo.png"
-              alt="logo"
-              style={{
-                width: 92,
-                height: 92,
-                objectFit: "contain",
-                borderRadius: 18,
-                background: "white",
-                border: "2px solid rgba(13,59,102,.12)",
-              }}
-            />
-          </div>
-        </aside>
-      </main>
+        </div>
+      </div>
     </div>
   );
 }

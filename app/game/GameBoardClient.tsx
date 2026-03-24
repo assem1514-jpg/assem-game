@@ -1,4 +1,3 @@
-// app/game/GameBoardClient.tsx
 "use client";
 
 import Link from "next/link";
@@ -7,16 +6,28 @@ import { useSearchParams, useRouter } from "next/navigation";
 import styles from "./page.module.css";
 
 import { db } from "@/lib/firebase";
-import { collection, getDocs, query, where, documentId } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  documentId,
+  doc,
+  onSnapshot,
+  limit,
+  updateDoc,
+} from "firebase/firestore";
 import { Icon } from "@iconify/react";
 
 type Team = { name: string; score: number; icon?: string };
 type CatMeta = { id: string; name: string; imageUrl?: string };
 
 const LS_KEY = "assem_game_v1";
+const POINTS_ROWS: Array<200 | 400 | 600> = [600, 400, 200];
 
-// ✅ 6 خلايا: 2x600 ثم 2x400 ثم 2x200 (من فوق لتحت)
-const POINTS_ROWS: number[] = [600, 600, 400, 400, 200, 200];
+/* مقاس تصميم ثابت للوحة اللعبة */
+const STAGE_W = 1600;
+const STAGE_H = 900;
 
 function loadGame() {
   if (typeof window === "undefined") return null;
@@ -29,6 +40,7 @@ function loadGame() {
 }
 
 function saveGame(data: any) {
+  if (typeof window === "undefined") return;
   localStorage.setItem(LS_KEY, JSON.stringify(data));
 }
 
@@ -42,28 +54,135 @@ function normalizeCatsParam(input: string) {
   return s;
 }
 
-function renderTeamIcon(icon?: string, size = 18) {
-  if (!icon) return null;
-  // إذا كانت Iconify id مثل "mdi:soccer"
-  if (typeof icon === "string" && icon.includes(":")) {
-    return <Icon icon={icon} width={size} height={size} />;
-  }
-  // لو كان شيء قديم (ايموجي)
-  return <span>{icon}</span>;
-}
-
 export default function GameBoardClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const rawCats = normalizeCatsParam(sp.get("cats") || "");
+  const [mounted, setMounted] = useState(false);
+  const [game, setGame] = useState<any | null>(null);
+  const [activePackId, setActivePackId] = useState<string>("main");
+  const [turnIndex, setTurnIndex] = useState<number>(0);
+  const [openRoundEnd, setOpenRoundEnd] = useState(false);
+  const [sessionDocId, setSessionDocId] = useState<string>("");
 
-  // ✅ إزالة أي تكرار في catIds (عشان ما تتكرر أعمدة)
+  const [viewport, setViewport] = useState({ w: 0, h: 0 });
+
+  const rawCats = normalizeCatsParam(sp.get("cats") || "");
+  const sessionCode = (sp.get("session") || "").trim().toUpperCase();
+
+  async function persistGame(updatedGame: any) {
+    saveGame(updatedGame);
+    setGame(updatedGame);
+    setTurnIndex(Number(updatedGame?.turnIndex ?? 0) || 0);
+
+    if (sessionDocId) {
+      try {
+        await updateDoc(doc(db, "sessions", sessionDocId), {
+          gameData: updatedGame,
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
+
+  useEffect(() => {
+    const cfgRef = doc(db, "appConfig", "main");
+    const unsub = onSnapshot(cfgRef, (snap) => {
+      const data = snap.data() as any;
+      setActivePackId(data?.activePackId || "main");
+    });
+
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initGame() {
+      let initialGame: any | null = null;
+      let foundSessionDocId = "";
+
+      if (sessionCode) {
+        try {
+          const q = query(
+            collection(db, "sessions"),
+            where("code", "==", sessionCode),
+            where("isActive", "==", true),
+            limit(1)
+          );
+
+          const snap = await getDocs(q);
+
+          if (!snap.empty) {
+            foundSessionDocId = snap.docs[0].id;
+            const sessionData = snap.docs[0].data() as any;
+            const expiresAt = Number(sessionData?.expiresAt ?? 0);
+
+            if (expiresAt && Date.now() <= expiresAt && sessionData?.gameData) {
+              initialGame = sessionData.gameData;
+              saveGame(initialGame);
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      if (!initialGame) {
+        initialGame = loadGame();
+      }
+
+      if (!cancelled) {
+        setSessionDocId(foundSessionDocId);
+        setGame(initialGame);
+        setTurnIndex(Number(initialGame?.turnIndex ?? 0) || 0);
+        setMounted(true);
+      }
+    }
+
+    initGame();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionCode]);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      setViewport({
+        w: window.innerWidth,
+        h: window.innerHeight,
+      });
+    };
+
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    window.addEventListener("orientationchange", updateViewport);
+
+    return () => {
+      window.removeEventListener("resize", updateViewport);
+      window.removeEventListener("orientationchange", updateViewport);
+    };
+  }, []);
+
+  const stageScale = useMemo(() => {
+    if (!viewport.w || !viewport.h) return 1;
+    const pad = 12;
+    const availableW = Math.max(0, viewport.w - pad * 2);
+    const availableH = Math.max(0, viewport.h - pad * 2);
+    return Math.min(availableW / STAGE_W, availableH / STAGE_H);
+  }, [viewport]);
+
   const catIds = useMemo(() => {
-    const arr = rawCats
+    const sourceCats =
+      rawCats ||
+      (Array.isArray(game?.cats) ? game.cats.join(",") : "");
+
+    const arr = sourceCats
       .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean);
+      .map((x: string) => x.trim())
+      .filter((x: string) => Boolean(x));
 
     const seen = new Set<string>();
     const unique: string[] = [];
@@ -74,538 +193,469 @@ export default function GameBoardClient() {
       }
     }
     return unique;
-  }, [rawCats]);
+  }, [rawCats, game?.cats]);
 
-  const [game, setGame] = useState(() => loadGame());
+  const teams: Team[] = (game?.teams || []) as Team[];
+  const safeTurnIndex = teams.length ? Math.min(turnIndex, teams.length - 1) : 0;
+  const currentTeam = teams[safeTurnIndex];
+  const used: Record<string, boolean> = (game?.used || {}) as Record<string, boolean>;
+
   const [catsMeta, setCatsMeta] = useState<Record<string, CatMeta>>({});
-
-  // ✅ هل توجد خلية فعلاً؟ + ربط كل خلية بـ questionId ثابت
   const [hasQuestion, setHasQuestion] = useState<Record<string, boolean>>({});
-  const [qidByCell, setQidByCell] = useState<Record<string, string>>({});
-
-  // ✅ مهم: نعرف متى "تحميل الأسئلة" اكتمل فعلاً (عشان لا تظهر النهاية أول ما نفتح اللوحة)
   const [questionsReady, setQuestionsReady] = useState(false);
 
-  // ✅ نهاية اللعبة (بوديوم)
-  const [showEnd, setShowEnd] = useState(false);
-
-  // ✅ جلب ميتا الفئات (الاسم + الصورة)
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      if (!catIds.length) {
-        setCatsMeta({});
-        return;
-      }
-
-      const buildMap = (snap: any) => {
-        const map: Record<string, CatMeta> = {};
-        snap.docs.forEach((d: any) => {
-          const data = d.data?.() ?? {};
-          map[d.id] = {
-            id: d.id,
-            name: (data.name ?? data.title ?? data.catName ?? "").toString().trim(),
-            imageUrl: (data.imageUrl ?? data.image ?? data.photoUrl ?? "").toString().trim(),
-          };
-        });
-        return map;
-      };
+      if (!catIds.length) return;
 
       try {
         const q1 = query(
-          collection(db, "packs", "main", "categories"),
+          collection(db, "packs", activePackId, "categories"),
           where(documentId(), "in", catIds.slice(0, 10))
         );
-        const snap1 = await getDocs(q1);
-        let map = buildMap(snap1);
 
-        // fallback
-        const missing = catIds.filter((id) => !(map[id]?.name || "").trim());
-        if (missing.length) {
-          const q2 = query(collection(db, "categories"), where(documentId(), "in", missing.slice(0, 10)));
-          const snap2 = await getDocs(q2);
-          map = { ...map, ...buildMap(snap2) };
-        }
+        const snap = await getDocs(q1);
+        const map: Record<string, CatMeta> = {};
+
+        snap.forEach((d) => {
+          const data = d.data() as any;
+          map[d.id] = {
+            id: d.id,
+            name: (data.name ?? "").toString().trim(),
+            imageUrl: (data.imageUrl ?? "").toString().trim(),
+          };
+        });
 
         if (!cancelled) setCatsMeta(map);
       } catch (e) {
         console.error(e);
-        if (!cancelled) setCatsMeta({});
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [catIds.join("|")]);
+  }, [catIds.join("|"), activePackId]);
 
-  // ✅ بناء hasQuestion + qidByCell من الأسئلة الحقيقية
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       setQuestionsReady(false);
+      if (!catIds.length) return;
 
-      if (!catIds.length) {
-        setHasQuestion({});
-        setQidByCell({});
-        setQuestionsReady(true);
-        return;
-      }
+      const hasMap: Record<string, boolean> = {};
 
       try {
-        const hasMap: Record<string, boolean> = {};
-        const idMap: Record<string, string> = {};
-
         for (const catId of catIds) {
-          const snap = await getDocs(collection(db, "packs", "main", "categories", catId, "questions"));
+          const snap = await getDocs(
+            collection(db, "packs", activePackId, "categories", catId, "questions")
+          );
 
-          const bucket: Record<number, string[]> = { 200: [], 400: [], 600: [] };
+          const counts: Record<number, number> = { 200: 0, 400: 0, 600: 0 };
 
           snap.forEach((d) => {
             const data = d.data() as any;
             const pts = Number(data.points || 0);
             if (![200, 400, 600].includes(pts)) return;
-            bucket[pts].push(d.id);
+            counts[pts] = (counts[pts] || 0) + 1;
           });
 
-          // ✅ اختيار ثابت: sort by id
           for (const pts of [200, 400, 600] as const) {
-            const ids = (bucket[pts] || []).slice().sort();
-            if (ids[0]) {
-              const key0 = `${catId}:${pts}:0`;
-              hasMap[key0] = true;
-              idMap[key0] = ids[0];
-            }
-            if (ids[1]) {
-              const key1 = `${catId}:${pts}:1`;
-              hasMap[key1] = true;
-              idMap[key1] = ids[1];
-            }
+            hasMap[`${catId}:${pts}:0`] = (counts[pts] || 0) >= 1;
+            hasMap[`${catId}:${pts}:1`] = (counts[pts] || 0) >= 2;
           }
-        }
-
-        if (!cancelled) {
-          setHasQuestion(hasMap);
-          setQidByCell(idMap);
-          setQuestionsReady(true);
         }
       } catch (e) {
         console.error(e);
-        if (!cancelled) {
-          setHasQuestion({});
-          setQidByCell({});
-          setQuestionsReady(true);
-        }
+      }
+
+      if (!cancelled) {
+        setHasQuestion(hasMap);
+        setQuestionsReady(true);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [catIds.join("|")]);
+  }, [catIds.join("|"), activePackId]);
 
-  function isUsed(catId: string, pts: number, idx: number) {
-    return !!game?.used?.[`${catId}:${pts}:${idx}`];
-  }
-
-  function canOpen(catId: string, pts: number, idx: number) {
-    return !!hasQuestion[`${catId}:${pts}:${idx}`];
-  }
-
-  // ✅ عدد الخلايا المتاحة فعلياً (لو = 0 ما نعتبر اللعبة "انتهت")
-  const availableCellsCount = useMemo(() => Object.keys(hasQuestion).length, [hasQuestion]);
-
-  // ✅ هل انتهت كل الخلايا؟
-  const allCellsDone = useMemo(() => {
-    if (!questionsReady) return false;
-    if (!game || !catIds.length) return false;
-    if (availableCellsCount === 0) return false;
-
+  const playableKeys = useMemo(() => {
+    const keys: string[] = [];
     for (const catId of catIds) {
       for (const pts of [200, 400, 600] as const) {
         for (const idx of [0, 1] as const) {
-          const key = `${catId}:${pts}:${idx}`;
-          const available = !!hasQuestion[key];
-          if (available) {
-            const used = !!game?.used?.[key];
-            if (!used) return false;
-          }
+          const k = `${catId}:${pts}:${idx}`;
+          if (hasQuestion[k]) keys.push(k);
         }
       }
     }
-    return true;
-  }, [questionsReady, game, catIds.join("|"), hasQuestion, availableCellsCount]);
+    return keys;
+  }, [catIds.join("|"), hasQuestion]);
+
+  const roundFinished = useMemo(() => {
+    if (!questionsReady) return false;
+    if (!playableKeys.length) return false;
+    return playableKeys.every((k: string) => !!used[k]);
+  }, [questionsReady, playableKeys, used]);
 
   useEffect(() => {
+    if (!mounted) return;
     if (!game) return;
-    if (questionsReady && allCellsDone) setShowEnd(true);
-  }, [questionsReady, allCellsDone, game]);
+
+    if (roundFinished) setOpenRoundEnd(true);
+    if (!roundFinished) setOpenRoundEnd(false);
+  }, [roundFinished, mounted, game]);
+
+  const winners = useMemo(() => {
+    const list = (teams || []).map((t: Team) => ({
+      name: (t?.name || "").trim() || "فريق",
+      score: Number(t?.score || 0),
+      icon: t?.icon,
+    }));
+    if (!list.length) return { max: 0, winners: [] as typeof list };
+
+    const max = Math.max(...list.map((x: { score: number }) => x.score));
+    const w = list.filter((x: { score: number }) => x.score === max);
+    return { max, winners: w };
+  }, [teams]);
 
   function openQuestion(catId: string, pts: number, idx: number) {
-    if (!game) return;
-    const key = `${catId}:${pts}:${idx}`;
-    const qid = qidByCell[key] || "";
-
+    const sessionPart = sessionCode ? `&session=${encodeURIComponent(sessionCode)}` : "";
     router.push(
-      `/game/question?cat=${encodeURIComponent(catId)}&pts=${pts}&idx=${idx}&qid=${encodeURIComponent(
-        qid
-      )}&cats=${encodeURIComponent(catIds.join(","))}`
+      `/game/question?cat=${catId}&pts=${pts}&idx=${idx}&cats=${catIds.join(",")}${sessionPart}`
     );
   }
 
-  function changeScore(teamIndex: number, delta: number) {
-    if (!game) return;
-    const updated = { ...game };
-    updated.teams = (updated.teams || []).map((t: Team, i: number) =>
-      i === teamIndex ? { ...t, score: Math.max(0, (t.score || 0) + delta) } : t
-    );
-    saveGame(updated);
-    setGame(updated);
+  async function nextTurn() {
+    if (!teams.length) return;
+    const next = (safeTurnIndex + 1) % teams.length;
+    setTurnIndex(next);
+
+    const g = loadGame();
+    const merged = { ...(g || {}), turnIndex: next };
+    await persistGame(merged);
   }
 
-  // ✅ زر تبديل الفريق (داخل دور الفريق)
-  function switchTeam() {
-    if (!game) return;
-    const teamsCount = Number(game?.teams?.length || 0);
-    if (teamsCount <= 1) return;
+  async function updateTeamScore(teamIdx: number, diff: number) {
+    const g = loadGame() || {};
+    const currentTeams = Array.isArray(g.teams) ? g.teams : [];
 
-    const updated = { ...game };
-    const cur = Number(updated.turnIndex || 0);
-    updated.turnIndex = (cur + 1) % teamsCount;
+    const updatedTeams = currentTeams.map((t: Team, idx: number) => {
+      if (idx !== teamIdx) return t;
+      return {
+        ...t,
+        score: Math.max(0, Number(t.score || 0) + diff),
+      };
+    });
 
-    saveGame(updated);
-    setGame(updated);
+    const updated = { ...g, teams: updatedTeams };
+    await persistGame(updated);
   }
 
-  function finishAndGoHome() {
-    localStorage.removeItem(LS_KEY);
-    router.push("/");
+  async function newRoundKeepScores() {
+    const g = loadGame() || {};
+    const updated = { ...g };
+    updated.used = {};
+    updated.seenQuestions = {};
+    updated.turnIndex = 0;
+
+    await persistGame(updated);
+    setOpenRoundEnd(false);
   }
 
-  function restartGame() {
-    router.push("/categories");
+  async function newRoundResetScores() {
+    const g = loadGame() || {};
+    const updated = { ...g };
+    updated.used = {};
+    updated.seenQuestions = {};
+    updated.turnIndex = 0;
+    updated.teams = (updated.teams || []).map((t: Team) => ({ ...t, score: 0 }));
+
+    await persistGame(updated);
+    setOpenRoundEnd(false);
   }
 
-  const podium = useMemo(() => {
-    const teams: Team[] = (game?.teams || []).slice();
-    teams.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
-    return teams;
-  }, [game]);
+  const firstTeam = teams[0];
+  const secondTeam = teams[1];
+  const extraTeams = teams.slice(2);
 
-  if (!game) {
-    return (
-      <div className={styles.page}>
-        <div style={{ padding: 24 }}>
-          ما فيه لعبة شغالة. ارجع للفئات وابدأ لعبة جديدة.
-          <div style={{ marginTop: 12 }}>
-            <Link href="/categories">الذهاب لصفحة الفئات</Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const currentTeam: Team | undefined = game?.teams?.[game?.turnIndex ?? 0];
+  if (!mounted) return null;
+  if (!game) return <div style={{ padding: 24 }}>ما فيه لعبة شغالة.</div>;
 
   return (
-    <div className={styles.page} style={{ overflow: "hidden" }}>
-      {/* ✅ نهاية اللعبة */}
-      {showEnd ? (
-        <div className={styles.endOverlay}>
-          <div className={styles.endCard}>
-            <div className={styles.endHeader}>
-              <div>
-                <div className={styles.endTitle}>انتهت اللعبة 🎉</div>
-                <div className={styles.endSub}>الترتيب حسب أعلى النقاط</div>
-              </div>
-              <button className={styles.endBtnGhost} onClick={() => setShowEnd(false)} type="button">
-                إغلاق
-              </button>
-            </div>
-
-            <div className={styles.podiumWrap}>
-              <div className={styles.podium}>
-                {/* 2nd */}
-                <div className={styles.podiumCol}>
-                  <div className={styles.podiumTop}>
-                    <span className={`${styles.badge} ${styles.badge2}`}>2</span>
-                    <span>الثاني</span>
-                  </div>
-                  <div className={styles.podiumName} title={podium[1]?.name || "—"}>
-                    {podium[1]?.icon ? <span style={{ marginInlineEnd: 8 }}>{renderTeamIcon(podium[1].icon, 18)}</span> : null}
-                    {podium[1]?.name || "—"}
-                  </div>
-                  <div className={styles.podiumScore}>{podium[1]?.score ?? 0}</div>
-                  <div className={`${styles.podiumBase} ${styles.base2}`}>🥈</div>
-                </div>
-
-                {/* 1st */}
-                <div className={styles.podiumCol}>
-                  <div className={styles.podiumTop}>
-                    <span className={`${styles.badge} ${styles.badge1}`}>1</span>
-                    <span>الأول</span>
-                  </div>
-                  <div className={styles.podiumName} title={podium[0]?.name || "—"}>
-                    {podium[0]?.icon ? <span style={{ marginInlineEnd: 8 }}>{renderTeamIcon(podium[0].icon, 18)}</span> : null}
-                    {podium[0]?.name || "—"}
-                  </div>
-                  <div className={styles.podiumScore}>{podium[0]?.score ?? 0}</div>
-                  <div className={`${styles.podiumBase} ${styles.base1}`}>🏆</div>
-                </div>
-
-                {/* 3rd */}
-                <div className={styles.podiumCol}>
-                  <div className={styles.podiumTop}>
-                    <span className={`${styles.badge} ${styles.badge3}`}>3</span>
-                    <span>الثالث</span>
-                  </div>
-                  <div className={styles.podiumName} title={podium[2]?.name || "—"}>
-                    {podium[2]?.icon ? <span style={{ marginInlineEnd: 8 }}>{renderTeamIcon(podium[2].icon, 18)}</span> : null}
-                    {podium[2]?.name || "—"}
-                  </div>
-                  <div className={styles.podiumScore}>{podium[2]?.score ?? 0}</div>
-                  <div className={`${styles.podiumBase} ${styles.base3}`}>🥉</div>
-                </div>
+    <div className={styles.page}>
+      <div className={styles.fitWrap}>
+        <div
+          className={styles.stageScale}
+          style={{
+            width: `${STAGE_W}px`,
+            height: `${STAGE_H}px`,
+            transform: `scale(${stageScale})`,
+          }}
+        >
+          <div className={styles.stage}>
+            <header className={styles.topBar}>
+              <div className={styles.leftBtns}>
+                <Link className={styles.smallBtn} href="/categories">
+                  <Icon icon="mdi:logout" width={18} height={18} />
+                  الخروج
+                </Link>
               </div>
 
-              {podium.length > 3 ? (
-                <div style={{ background: "white", borderRadius: 18, border: "2px solid rgba(13,59,102,.10)", padding: 14 }}>
-                  <div style={{ fontWeight: 900, color: "var(--navy)", marginBottom: 10 }}>باقي الترتيب</div>
-                  <div style={{ display: "grid", gap: 10 }}>
-                    {podium.slice(3).map((t, idx) => (
-                      <div
-                        key={`${t.name}-${idx}`}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 10,
-                          padding: "10px 12px",
-                          borderRadius: 14,
-                          border: "2px solid rgba(13,59,102,.10)",
-                          background: "rgba(13,59,102,.04)",
-                          fontWeight: 900,
-                          color: "var(--navy)",
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, overflow: "hidden" }}>
-                          <div
-                            style={{
-                              width: 34,
-                              height: 34,
-                              borderRadius: 12,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              border: "2px solid rgba(13,59,102,.14)",
-                              background: "white",
-                              flex: "0 0 auto",
-                            }}
-                          >
-                            {idx + 4}
-                          </div>
-                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {t.icon ? <span style={{ marginInlineEnd: 8 }}>{renderTeamIcon(t.icon, 18)}</span> : null}
-                            {t.name}
+              <div className={styles.logoCenter}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className={styles.headerLogo} src="/logo.png" alt="مستوى" />
+              </div>
+
+              <div className={styles.turnWrap}>
+                <div className={styles.turnPill}>
+                  <span>دور فريق:</span>
+                  <strong>{currentTeam?.name || `الفريق ${safeTurnIndex + 1}`}</strong>
+                  <button className={styles.turnBtn} type="button" onClick={nextTurn} title="تبديل الدور">
+                    <Icon icon="mdi:swap-horizontal" width={18} height={18} />
+                  </button>
+                </div>
+              </div>
+            </header>
+
+            <main className={styles.boardWrap}>
+              <div className={styles.boardArea}>
+                <div
+                  className={styles.board}
+                  style={{ gridTemplateColumns: `repeat(${catIds.length}, minmax(0, 1fr))` }}
+                >
+                  {catIds.map((catId) => {
+                    const meta = catsMeta[catId];
+
+                    return (
+                      <div key={catId} className={styles.categoryCard}>
+                        <div className={styles.catMedia}>
+                          {meta?.imageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img className={styles.catImg} src={meta.imageUrl} alt={meta.name} />
+                          ) : (
+                            <div className={styles.catImgFallback} />
+                          )}
+
+                          <div className={styles.catNameOverlay}>
+                            <div className={styles.catName}>{meta?.name || "..."}</div>
                           </div>
                         </div>
-                        <div
-                          style={{
-                            background: "rgba(250,240,202,.75)",
-                            border: "2px solid rgba(13,59,102,.12)",
-                            borderRadius: 999,
-                            padding: "6px 10px",
-                            minWidth: 64,
-                            textAlign: "center",
-                          }}
+
+                        {POINTS_ROWS.map((pts) => (
+                          <div key={`${catId}-${pts}`} className={styles.pointsRow}>
+                            {[0, 1].map((idx) => {
+                              const key = `${catId}:${pts}:${idx}`;
+                              const enabled = !!hasQuestion[key];
+                              const isUsed = !!used[key];
+
+                              return (
+                                <button
+                                  key={key}
+                                  className={`${styles.cell} ${styles[`pts${pts}`]} ${isUsed ? styles.used : ""}`}
+                                  onClick={() => enabled && !isUsed && openQuestion(catId, pts, idx)}
+                                  disabled={!questionsReady || !enabled || isUsed}
+                                  type="button"
+                                >
+                                  <span className={styles.cellValue}>{pts}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className={styles.teamsBar}>
+                <div className={styles.teamsMain}>
+                  {firstTeam ? (
+                    <div className={`${styles.teamCard} ${0 === safeTurnIndex ? styles.teamActive : ""}`}>
+                      <div className={styles.teamManualCol}>
+                        <button
+                          type="button"
+                          className={styles.scoreBtn}
+                          onClick={() => updateTeamScore(0, 100)}
+                          title="زيادة 100"
                         >
-                          {t.score ?? 0}
+                          <Icon icon="mdi:plus" width={18} height={18} />
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.scoreBtn}
+                          onClick={() => updateTeamScore(0, -100)}
+                          title="خصم 100"
+                        >
+                          <Icon icon="mdi:minus" width={18} height={18} />
+                        </button>
+                      </div>
+
+                      <div className={styles.teamAvatar}>
+                        {firstTeam.icon ? (
+                          <Icon icon={firstTeam.icon} width={38} height={38} />
+                        ) : (
+                          <Icon icon="mdi:account-group" width={34} height={34} />
+                        )}
+                      </div>
+
+                      <div className={styles.teamCenter}>
+                        <div className={styles.teamName}>{firstTeam.name || "الفريق 1"}</div>
+                        <div className={styles.teamScoreLine}>
+                          نقاطنا: <span className={styles.teamScoreNum}>{Number(firstTeam.score || 0)}</span>
                         </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div />
+                  )}
+
+                  <div className={styles.teamsCenterLogo}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img className={styles.teamsLogo} src="/logo.png" alt="مستوى" />
+                  </div>
+
+                  {secondTeam ? (
+                    <div className={`${styles.teamCard} ${1 === safeTurnIndex ? styles.teamActive : ""}`}>
+                      <div className={styles.teamCenter}>
+                        <div className={styles.teamName}>{secondTeam.name || "الفريق 2"}</div>
+                        <div className={styles.teamScoreLine}>
+                          نقاطنا: <span className={styles.teamScoreNum}>{Number(secondTeam.score || 0)}</span>
+                        </div>
+                      </div>
+
+                      <div className={styles.teamAvatar}>
+                        {secondTeam.icon ? (
+                          <Icon icon={secondTeam.icon} width={38} height={38} />
+                        ) : (
+                          <Icon icon="mdi:account-group" width={34} height={34} />
+                        )}
+                      </div>
+
+                      <div className={styles.teamManualCol}>
+                        <button
+                          type="button"
+                          className={styles.scoreBtn}
+                          onClick={() => updateTeamScore(1, 100)}
+                          title="زيادة 100"
+                        >
+                          <Icon icon="mdi:plus" width={18} height={18} />
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.scoreBtn}
+                          onClick={() => updateTeamScore(1, -100)}
+                          title="خصم 100"
+                        >
+                          <Icon icon="mdi:minus" width={18} height={18} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div />
+                  )}
+                </div>
+
+                {extraTeams.length > 0 && (
+                  <div className={styles.extraTeamsRow}>
+                    {extraTeams.map((t, extraIdx) => {
+                      const realIdx = extraIdx + 2;
+                      return (
+                        <div
+                          key={realIdx}
+                          className={`${styles.teamCard} ${realIdx === safeTurnIndex ? styles.teamActive : ""}`}
+                        >
+                          <div className={styles.teamManualCol}>
+                            <button
+                              type="button"
+                              className={styles.scoreBtn}
+                              onClick={() => updateTeamScore(realIdx, 100)}
+                              title="زيادة 100"
+                            >
+                              <Icon icon="mdi:plus" width={18} height={18} />
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.scoreBtn}
+                              onClick={() => updateTeamScore(realIdx, -100)}
+                              title="خصم 100"
+                            >
+                              <Icon icon="mdi:minus" width={18} height={18} />
+                            </button>
+                          </div>
+
+                          <div className={styles.teamAvatar}>
+                            {t.icon ? (
+                              <Icon icon={t.icon} width={34} height={34} />
+                            ) : (
+                              <Icon icon="mdi:account-group" width={30} height={30} />
+                            )}
+                          </div>
+
+                          <div className={styles.teamCenter}>
+                            <div className={styles.teamName}>{t.name || `الفريق ${realIdx + 1}`}</div>
+                            <div className={styles.teamScoreLine}>
+                              نقاطنا: <span className={styles.teamScoreNum}>{Number(t.score || 0)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </main>
+
+            {openRoundEnd && (
+              <div className={styles.roundBackdrop} onClick={() => setOpenRoundEnd(false)}>
+                <div className={styles.roundCard} onClick={(e) => e.stopPropagation()}>
+                  <div className={styles.roundHeader}>
+                    <div className={styles.roundBadge}>🏆</div>
+                    <div>
+                      <div className={styles.roundTitle}>انتهت الجولة!</div>
+                      <div className={styles.roundSub}>
+                        {winners.winners.length > 1 ? "تعادل على المركز الأول" : "الفريق الفائز"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={styles.roundWinners}>
+                    {winners.winners.map((w, i) => (
+                      <div key={i} className={styles.winnerChip}>
+                        <span className={styles.winnerName}>{w.name}</span>
+                        <span className={styles.winnerScore}>{w.score}</span>
                       </div>
                     ))}
                   </div>
-                </div>
-              ) : null}
-            </div>
 
-            <div className={styles.endActions}>
-              <button className={styles.endBtn} onClick={restartGame} type="button">
-                لعبة جديدة
-              </button>
-              <button className={styles.endBtnGhost} onClick={finishAndGoHome} type="button">
-                إنهاء والعودة للرئيسية
-              </button>
-            </div>
+                  <div className={styles.roundHint}>
+                    أعلى نتيجة: <b>{winners.max}</b> نقطة
+                  </div>
+
+                  <div className={styles.roundActions}>
+                    <button type="button" className={styles.roundBtnPrimary} onClick={newRoundKeepScores}>
+                      جولة جديدة (نفس النقاط)
+                    </button>
+
+                    <button type="button" className={styles.roundBtnSecondary} onClick={newRoundResetScores}>
+                      جولة جديدة (تصفير النقاط)
+                    </button>
+
+                    <button type="button" className={styles.roundBtnGhost} onClick={() => setOpenRoundEnd(false)}>
+                      إغلاق
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      ) : null}
-
-      <header className={styles.topBar}>
-        <div className={styles.leftBtns}>
-          <Link className={styles.smallBtn} href="/categories">
-            الرجوع للفئات
-          </Link>
-
-          <button
-            className={styles.smallBtn}
-            onClick={() => {
-              localStorage.removeItem(LS_KEY);
-              router.push("/");
-            }}
-            type="button"
-          >
-            إنهاء اللعبة
-          </button>
-        </div>
-
-        {/* ✅ (2) تغيير العنوان */}
-        <div className={styles.centerTitle}>لعبة مستوى</div>
-
-        <div className={styles.turnPill}>
-          {/* ✅ (3) زر تبديل الفريق داخل دور الفريق */}
-          <button
-            type="button"
-            onClick={switchTeam}
-            title="تبديل الفريق"
-            aria-label="تبديل الفريق"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 34,
-              height: 34,
-              borderRadius: 999,
-              background: "rgba(250,240,202,.12)",
-              border: "1px solid rgba(250,240,202,.25)",
-              color: "inherit",
-              cursor: "pointer",
-            }}
-          >
-            <Icon icon="mdi:rotate-right" width="18" height="18" />
-          </button>
-
-          <span>دور فريق:</span>
-          <b style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            {currentTeam?.icon ? renderTeamIcon(currentTeam.icon, 18) : null}
-            <span>{currentTeam?.name ?? "—"}</span>
-          </b>
-        </div>
-      </header>
-
-      <main className={styles.boardWrap}>
-        <div
-          className={styles.board}
-          style={{
-            gridTemplateColumns: `repeat(${catIds.length}, minmax(0, 1fr))`,
-          }}
-        >
-          {/* ✅ الهيدر يرجع طبيعي (اسم + صورة). لو ميتا فئة معيّنة ناقصة، نعرض Skeleton لها فقط */}
-          {catIds.map((catId) => {
-            const meta = catsMeta[catId];
-            const title = (meta?.name || "").trim();
-            const img = (meta?.imageUrl || "").trim();
-
-            const loadingHeader = !title; // ما نعرض catId أبداً
-
-            return (
-              <div key={catId} className={styles.catHeader} style={{ backgroundImage: "none" as any }}>
-                {loadingHeader ? (
-                  <>
-                    <div style={{ height: 18, borderRadius: 10, background: "rgba(13,59,102,.10)", marginBottom: 10 }} />
-                    <div
-                      style={{
-                        height: 92,
-                        borderRadius: 14,
-                        background: "rgba(13,59,102,.08)",
-                        border: "1px solid rgba(13,59,102,.10)",
-                      }}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <div style={{ fontWeight: 900, color: "var(--navy)", marginBottom: 8, textAlign: "center" }}>
-                      {title}
-                    </div>
-
-                    {img ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={img}
-                        alt={title}
-                        style={{
-                          width: "100%",
-                          height: 92,
-                          objectFit: "cover",
-                          borderRadius: 14,
-                          border: "1px solid rgba(255,255,255,.20)",
-                        }}
-                      />
-                    ) : (
-                      <div
-                        style={{
-                          width: "100%",
-                          height: 92,
-                          borderRadius: 14,
-                          background: "rgba(255,255,255,.10)",
-                          border: "1px solid rgba(255,255,255,.14)",
-                        }}
-                      />
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })}
-
-          {/* ✅ 6 صفوف */}
-          {POINTS_ROWS.map((pts, rowIndex) =>
-            catIds.map((catId) => {
-              const idx = rowIndex % 2;
-
-              const used = isUsed(catId, pts, idx);
-              const enabled = canOpen(catId, pts, idx) && !used;
-
-              return (
-                <button
-                  key={`${catId}-${pts}-${idx}-${rowIndex}`}
-                  className={`${styles.cell} ${used ? styles.used : ""}`}
-                  onClick={() => enabled && openQuestion(catId, pts, idx)}
-                  type="button"
-                  disabled={!enabled}
-                  title={!canOpen(catId, pts, idx) ? "ما فيه سؤال بهذه النقاط" : ""}
-                >
-                  {pts}
-                </button>
-              );
-            })
-          )}
-        </div>
-
-        <section className={styles.teamsBar}>
-          {game?.teams?.map((t: Team, i: number) => (
-            <div key={i} className={styles.teamCard}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, overflow: "hidden" }}>
-                {t.icon ? renderTeamIcon(t.icon, 18) : null}
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
-              </div>
-
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <button className={styles.scoreBtn} onClick={() => changeScore(i, -50)} type="button" title="نقص 50">
-                  −
-                </button>
-
-                <div className={styles.teamScore}>{t.score}</div>
-
-                <button className={styles.scoreBtn} onClick={() => changeScore(i, +50)} type="button" title="زود 50">
-                  +
-                </button>
-              </div>
-            </div>
-          ))}
-        </section>
-      </main>
+      </div>
     </div>
   );
 }

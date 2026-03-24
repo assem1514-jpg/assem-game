@@ -13,10 +13,27 @@ import {
   query,
   serverTimestamp,
   updateDoc,
+  where,
 } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
-import type { Category } from "./page";
+
+type Section = {
+  id: string;
+  name: string;
+  order?: number;
+};
+
+type Category = {
+  id: string;
+  name: string;
+  imageUrl?: string;
+  videoUrl?: string;
+  description?: string;
+  sectionId?: string; // ✅ مهم عشان الفلترة
+  createdAt?: any;
+  updatedAt?: any;
+};
 
 type Question = {
   id: string;
@@ -35,14 +52,106 @@ type Question = {
 
 const POINTS: Array<200 | 400 | 600> = [200, 400, 600];
 
-export default function QuestionsTab({
-  activePackId,
-  categories,
-}: {
-  activePackId: string;
-  categories: Category[];
-}) {
+export default function QuestionsTab({ activePackId }: { activePackId: string }) {
+  // -----------------------------
+  // Sections + Categories
+  // -----------------------------
+  const [sections, setSections] = useState<Section[]>([]);
+  const [sectionsLoading, setSectionsLoading] = useState(true);
+  const [selectedSectionId, setSelectedSectionId] = useState<string>("");
+
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [catsLoading, setCatsLoading] = useState(true);
   const [selectedCatId, setSelectedCatId] = useState<string>("");
+
+  // load sections
+  useEffect(() => {
+    setSectionsLoading(true);
+    setSections([]);
+    setSelectedSectionId("");
+    setCategories([]);
+    setSelectedCatId("");
+
+    const colRef = collection(db, "packs", activePackId, "sections");
+    const qRef = query(colRef);
+
+    const unsub = onSnapshot(
+      qRef,
+      (snap) => {
+        const list: Section[] = snap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            id: d.id,
+            name: data.name ?? "",
+            order: Number(data.order ?? 0),
+          };
+        });
+
+        list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.name || "").localeCompare(b.name || "", "ar"));
+        setSections(list);
+        setSectionsLoading(false);
+
+        // auto pick first
+        if (list.length) setSelectedSectionId((prev) => prev || list[0].id);
+      },
+      () => {
+        setSections([]);
+        setSectionsLoading(false);
+      }
+    );
+
+    return () => unsub();
+  }, [activePackId]);
+
+  // load categories by sectionId from packs/{pack}/categories  ✅
+  useEffect(() => {
+    setCatsLoading(true);
+    setCategories([]);
+    setSelectedCatId("");
+
+    if (!selectedSectionId) {
+      setCatsLoading(false);
+      return;
+    }
+
+    const colRef = collection(db, "packs", activePackId, "categories");
+    const qRef = query(colRef, where("sectionId", "==", selectedSectionId));
+
+    const unsub = onSnapshot(
+      qRef,
+      (snap) => {
+        const list: Category[] = snap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            id: d.id,
+            name: data.name ?? "",
+            imageUrl: data.imageUrl ?? "",
+            videoUrl: data.videoUrl ?? "",
+            description: data.description ?? "",
+            sectionId: data.sectionId ?? data.groupId ?? data.section ?? "",
+            createdAt: data.createdAt ?? null,
+            updatedAt: data.updatedAt ?? null,
+          };
+        });
+
+        list.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
+        setCategories(list);
+        setCatsLoading(false);
+
+        if (list.length) setSelectedCatId((prev) => prev || list[0].id);
+      },
+      () => {
+        setCategories([]);
+        setCatsLoading(false);
+      }
+    );
+
+    return () => unsub();
+  }, [activePackId, selectedSectionId]);
+
+  // -----------------------------
+  // Questions
+  // -----------------------------
   const [questions, setQuestions] = useState<Question[]>([]);
   const [qsLoading, setQsLoading] = useState(false);
 
@@ -69,19 +178,13 @@ export default function QuestionsTab({
   const [editAVideoUrl, setEditAVideoUrl] = useState("");
   const [editAnswerFirstLetter, setEditAnswerFirstLetter] = useState("");
 
-  // auto select first category
+  // reset questions when pack/section/category changes
   useEffect(() => {
-    if (!selectedCatId && categories.length) setSelectedCatId(categories[0].id);
-  }, [categories, selectedCatId]);
-
-  // reset on pack change
-  useEffect(() => {
-    setSelectedCatId("");
     setQuestions([]);
     setEditingQId(null);
-  }, [activePackId]);
+  }, [activePackId, selectedSectionId, selectedCatId]);
 
-  // live subscribe questions
+  // live subscribe questions from packs/{pack}/categories/{catId}/questions ✅
   useEffect(() => {
     setQuestions([]);
     setEditingQId(null);
@@ -89,6 +192,7 @@ export default function QuestionsTab({
     if (!selectedCatId) return;
 
     setQsLoading(true);
+
     const colRef = collection(db, "packs", activePackId, "categories", selectedCatId, "questions");
 
     const unsub = onSnapshot(
@@ -112,11 +216,7 @@ export default function QuestionsTab({
           };
         });
 
-        list.sort(
-          (a, b) =>
-            b.points - a.points || String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))
-        );
-
+        list.sort((a, b) => b.points - a.points || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
         setQuestions(list);
         setQsLoading(false);
       },
@@ -130,6 +230,7 @@ export default function QuestionsTab({
   }, [activePackId, selectedCatId]);
 
   async function addQuestion() {
+    if (!selectedSectionId) return alert("اختر تصنيف أولًا");
     if (!selectedCatId) return alert("اختر فئة أولًا");
 
     const qt = qText.trim();
@@ -210,32 +311,55 @@ export default function QuestionsTab({
     await deleteDoc(doc(db, "packs", activePackId, "categories", selectedCatId, "questions", qId));
   }
 
-  const addHasPreview =
-    qImageUrl.trim() || qVideoUrl.trim() || aImageUrl.trim() || aVideoUrl.trim();
-
-  const editHasPreview =
-    editQImageUrl.trim() || editQVideoUrl.trim() || editAImageUrl.trim() || editAVideoUrl.trim();
+  const addHasPreview = qImageUrl.trim() || qVideoUrl.trim() || aImageUrl.trim() || aVideoUrl.trim();
+  const editHasPreview = editQImageUrl.trim() || editQVideoUrl.trim() || editAImageUrl.trim() || editAVideoUrl.trim();
 
   return (
     <section className={styles.content}>
-      {/* اختيار الفئة */}
+      {/* اختيار التصنيف + الفئة */}
       <div className={styles.card}>
         <div className={styles.cardHeader}>
-          <h2 className={styles.h2}>اختيار الفئة</h2>
-          <div className={styles.muted}>حدد الفئة لإدارة أسئلتها وإجاباتها</div>
+          <h2 className={styles.h2}>اختيار التصنيف والفئة</h2>
+          <div className={styles.muted}>اختر التصنيف ثم الفئة لإدارة الأسئلة</div>
         </div>
 
-        <select className={styles.input} value={selectedCatId} onChange={(e) => setSelectedCatId(e.target.value)}>
-          {categories.length === 0 ? (
-            <option value="">لا توجد فئات</option>
-          ) : (
-            categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))
-          )}
-        </select>
+        <div className={styles.grid3}>
+          <div className={styles.field}>
+            <label className={styles.label}>التصنيف</label>
+            <select className={styles.input} value={selectedSectionId} onChange={(e) => setSelectedSectionId(e.target.value)} disabled={sectionsLoading}>
+              {sectionsLoading ? (
+                <option value="">جاري التحميل…</option>
+              ) : sections.length === 0 ? (
+                <option value="">لا توجد تصنيفات</option>
+              ) : (
+                sections.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+
+          <div className={styles.field} style={{ gridColumn: "span 2" }}>
+            <label className={styles.label}>الفئة</label>
+            <select className={styles.input} value={selectedCatId} onChange={(e) => setSelectedCatId(e.target.value)} disabled={catsLoading || !selectedSectionId}>
+              {!selectedSectionId ? (
+                <option value="">اختر تصنيف أولًا</option>
+              ) : catsLoading ? (
+                <option value="">جاري التحميل…</option>
+              ) : categories.length === 0 ? (
+                <option value="">لا توجد فئات داخل هذا التصنيف</option>
+              ) : (
+                categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* إضافة سؤال */}
@@ -334,7 +458,7 @@ export default function QuestionsTab({
         ) : null}
 
         <div className={styles.row}>
-          <button className={styles.primaryBtn} onClick={addQuestion} disabled={!selectedCatId}>
+          <button className={styles.primaryBtn} onClick={addQuestion} disabled={!selectedSectionId || !selectedCatId}>
             إضافة السؤال
           </button>
         </div>
@@ -349,6 +473,8 @@ export default function QuestionsTab({
 
         {qsLoading ? (
           <div className={styles.muted}>جاري التحميل…</div>
+        ) : !selectedSectionId || !selectedCatId ? (
+          <div className={styles.empty}>اختر تصنيف وفئة.</div>
         ) : questions.length === 0 ? (
           <div className={styles.empty}>لا توجد أسئلة.</div>
         ) : (
@@ -472,12 +598,7 @@ export default function QuestionsTab({
 
             <div className={styles.field}>
               <label className={styles.label}>أول حرف من الإجابة</label>
-              <input
-                className={styles.input}
-                value={editAnswerFirstLetter}
-                onChange={(e) => setEditAnswerFirstLetter(e.target.value)}
-                placeholder="مثال: أ"
-              />
+              <input className={styles.input} value={editAnswerFirstLetter} onChange={(e) => setEditAnswerFirstLetter(e.target.value)} placeholder="مثال: أ" />
             </div>
 
             {editHasPreview ? (

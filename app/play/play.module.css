@@ -1,143 +1,144 @@
-/* app/play/play.module.css */
 .page{
   min-height: 100vh;
+  background: #faf0ca;
   direction: rtl;
-  background: #f3f3f3;
-  display: flex;
-  flex-direction: column;
-}
-
-.topBar{
-  height: 80px;
-  background: #6c00b8;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.brand{
-  background: rgba(255,255,255,0.12);
-  color: white;
-  font-weight: 900;
-  padding: 10px 28px;
-  border-radius: 999px;
-  font-size: 22px;
-}
-
-.content{
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1.2fr 1fr;
-  gap: 18px;
   padding: 18px;
-  align-items: center;
 }
 
-@media (max-width: 980px){
-  .content{ grid-template-columns: 1fr; }
-}
-
-.imageWrap{
-  background: white;
-  border-radius: 18px;
-  overflow: hidden;
-  min-height: 360px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.image{
+.wrap{
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: 980px;
 }
 
-.imagePlaceholder{
-  opacity: .6;
+.header{
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(255,255,255,.55);
+  backdrop-filter: blur(6px);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.08);
+  margin-bottom: 14px;
+}
+
+.logo{
+  width: 62px;
+  height: 62px;
+  object-fit: contain;
+}
+
+.headText{
+  min-width: 0;
+}
+
+.h1{
   font-weight: 900;
+  color: #0d3b66;
+  font-size: 20px;
 }
 
-.right{
+.h2{
+  margin-top: 4px;
+  opacity: .8;
+  font-weight: 800;
+  color: #0d3b66;
+  font-size: 14px;
+}
+
+.grid{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.choiceCard{
+  text-decoration: none;
+  color: inherit;
   background: white;
   border-radius: 18px;
   padding: 18px;
-  min-height: 360px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.08);
+  border: 2px solid rgba(13,59,102,.10);
+  transition: .2s;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-}
-
-.timerRow{
-  display: flex;
-  justify-content: flex-start;
-  margin-bottom: 10px;
-}
-
-.timerNum{
-  font-weight: 900;
-  font-size: 20px;
-  background: rgba(0,0,0,0.05);
-  padding: 10px 14px;
-  border-radius: 14px;
-}
-
-.questionText{
-  font-size: 28px;
-  font-weight: 900;
-  line-height: 1.4;
-}
-
-.answerBox{
-  margin-top: 14px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.85);
-  border: 2px solid rgba(0,0,0,0.08);
-  font-weight: 900;
-  font-size: 20px;
-}
-
-.bottomBar{
-  height: 120px;
-  background: #6c00b8;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 18px;
-  gap: 18px;
-}
-
-.helpTitle{
-  color: white;
-  font-weight: 900;
-  font-size: 22px;
-}
-
-.helpBtns{
-  display: flex;
   gap: 10px;
 }
 
-.helpBtnYellow{
-  height: 56px;
-  padding: 0 18px;
-  border: 0;
-  border-radius: 14px;
-  background: #f7c500;
-  color: #111;
-  font-weight: 900;
-  cursor: pointer;
-}
-.helpBtnYellow:disabled{
-  opacity: .7;
-  cursor: not-allowed;
+.choiceCard:hover{
+  transform: translateY(-2px);
 }
 
-.centerBox{
-  margin: auto;
+.choiceIcon{
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: rgba(13,59,102,.08);
+  display: grid;
+  place-items: center;
+  color: #0d3b66;
+}
+
+.choiceTitle{
+  font-weight: 1000;
+  color: #0d3b66;
+  font-size: 18px;
+}
+
+.choiceDesc{
+  opacity: .75;
+  font-weight: 800;
+  line-height: 1.6;
+}
+
+.bottom{
+  margin-top: 14px;
+  display: flex;
+  justify-content: center;
+}
+
+.backBtn{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  background: #0d3b66;
+  color: #faf0ca;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-weight: 900;
+  box-shadow: 0 8px 18px rgba(0,0,0,.12);
+}
+
+.card{
   background: white;
   border-radius: 18px;
   padding: 18px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.08);
+  text-align: center;
+}
+
+.title{
   font-weight: 900;
+  color: #0d3b66;
+  margin-bottom: 12px;
+}
+
+.primaryBtn{
+  display: inline-block;
+  text-decoration: none;
+  background: #f4d35e;
+  color: #0d3b66;
+  padding: 10px 16px;
+  border-radius: 14px;
+  font-weight: 1000;
+}
+
+@media (max-width: 760px){
+  .grid{ grid-template-columns: 1fr; }
+  .logo{ width: 54px; height: 54px; }
 }
