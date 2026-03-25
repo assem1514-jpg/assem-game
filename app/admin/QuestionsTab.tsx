@@ -1,7 +1,7 @@
 // app/admin/QuestionsTab.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./admin.module.css";
 
 import {
@@ -30,7 +30,7 @@ type Category = {
   imageUrl?: string;
   videoUrl?: string;
   description?: string;
-  sectionId?: string; // ✅ مهم عشان الفلترة
+  sectionId?: string;
   createdAt?: any;
   updatedAt?: any;
 };
@@ -52,10 +52,33 @@ type Question = {
 
 const POINTS: Array<200 | 400 | 600> = [200, 400, 600];
 
+const CLOUDINARY_CLOUD_NAME = "driw9oyiu";
+const CLOUDINARY_UPLOAD_PRESET = "mostawa_unsigned";
+
+async function uploadImageToCloudinary(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+  formData.append("folder", "mostawa");
+
+  const res = await fetch(
+    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+    {
+      method: "POST",
+      body: formData,
+    }
+  );
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(data?.error?.message || "فشل رفع الصورة");
+  }
+
+  return String(data.secure_url || "");
+}
+
 export default function QuestionsTab({ activePackId }: { activePackId: string }) {
-  // -----------------------------
-  // Sections + Categories
-  // -----------------------------
   const [sections, setSections] = useState<Section[]>([]);
   const [sectionsLoading, setSectionsLoading] = useState(true);
   const [selectedSectionId, setSelectedSectionId] = useState<string>("");
@@ -64,7 +87,6 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
   const [catsLoading, setCatsLoading] = useState(true);
   const [selectedCatId, setSelectedCatId] = useState<string>("");
 
-  // load sections
   useEffect(() => {
     setSectionsLoading(true);
     setSections([]);
@@ -87,11 +109,14 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
           };
         });
 
-        list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.name || "").localeCompare(b.name || "", "ar"));
+        list.sort(
+          (a, b) =>
+            (a.order ?? 0) - (b.order ?? 0) ||
+            (a.name || "").localeCompare(b.name || "", "ar")
+        );
         setSections(list);
         setSectionsLoading(false);
 
-        // auto pick first
         if (list.length) setSelectedSectionId((prev) => prev || list[0].id);
       },
       () => {
@@ -103,7 +128,6 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
     return () => unsub();
   }, [activePackId]);
 
-  // load categories by sectionId from packs/{pack}/categories  ✅
   useEffect(() => {
     setCatsLoading(true);
     setCategories([]);
@@ -149,13 +173,9 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
     return () => unsub();
   }, [activePackId, selectedSectionId]);
 
-  // -----------------------------
-  // Questions
-  // -----------------------------
   const [questions, setQuestions] = useState<Question[]>([]);
   const [qsLoading, setQsLoading] = useState(false);
 
-  // add
   const [qText, setQText] = useState("");
   const [qPoints, setQPoints] = useState<200 | 400 | 600>(200);
   const [qImageUrl, setQImageUrl] = useState("");
@@ -165,9 +185,11 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
   const [aVideoUrl, setAVideoUrl] = useState("");
   const [answerFirstLetter, setAnswerFirstLetter] = useState("");
 
-  // edit
   const [editingQId, setEditingQId] = useState<string | null>(null);
-  const editingQ = useMemo(() => questions.find((q) => q.id === editingQId) || null, [questions, editingQId]);
+  const editingQ = useMemo(
+    () => questions.find((q) => q.id === editingQId) || null,
+    [questions, editingQId]
+  );
 
   const [editQText, setEditQText] = useState("");
   const [editQPoints, setEditQPoints] = useState<200 | 400 | 600>(200);
@@ -178,13 +200,21 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
   const [editAVideoUrl, setEditAVideoUrl] = useState("");
   const [editAnswerFirstLetter, setEditAnswerFirstLetter] = useState("");
 
-  // reset questions when pack/section/category changes
+  const [uploadingAddQImage, setUploadingAddQImage] = useState(false);
+  const [uploadingAddAImage, setUploadingAddAImage] = useState(false);
+  const [uploadingEditQImage, setUploadingEditQImage] = useState(false);
+  const [uploadingEditAImage, setUploadingEditAImage] = useState(false);
+
+  const addQImageInputRef = useRef<HTMLInputElement | null>(null);
+  const addAImageInputRef = useRef<HTMLInputElement | null>(null);
+  const editQImageInputRef = useRef<HTMLInputElement | null>(null);
+  const editAImageInputRef = useRef<HTMLInputElement | null>(null);
+
   useEffect(() => {
     setQuestions([]);
     setEditingQId(null);
   }, [activePackId, selectedSectionId, selectedCatId]);
 
-  // live subscribe questions from packs/{pack}/categories/{catId}/questions ✅
   useEffect(() => {
     setQuestions([]);
     setEditingQId(null);
@@ -193,7 +223,14 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
 
     setQsLoading(true);
 
-    const colRef = collection(db, "packs", activePackId, "categories", selectedCatId, "questions");
+    const colRef = collection(
+      db,
+      "packs",
+      activePackId,
+      "categories",
+      selectedCatId,
+      "questions"
+    );
 
     const unsub = onSnapshot(
       query(colRef),
@@ -209,14 +246,20 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
             answerText: data.answerText ?? "",
             answerImageUrl: data.answerImageUrl ?? "",
             answerVideoUrl: data.answerVideoUrl ?? "",
-            answerFirstLetter: (data.answerFirstLetter ?? data.hintLetter ?? "")?.toString?.() ?? "",
+            answerFirstLetter:
+              (data.answerFirstLetter ?? data.hintLetter ?? "")?.toString?.() ??
+              "",
             hintLetter: data.hintLetter ?? "",
             createdAt: data.createdAt ?? null,
             updatedAt: data.updatedAt ?? null,
           };
         });
 
-        list.sort((a, b) => b.points - a.points || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+        list.sort(
+          (a, b) =>
+            b.points - a.points ||
+            String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))
+        );
         setQuestions(list);
         setQsLoading(false);
       },
@@ -228,6 +271,66 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
 
     return () => unsub();
   }, [activePackId, selectedCatId]);
+
+  async function handleUploadAddQuestionImage(file?: File | null) {
+    if (!file) return;
+    try {
+      setUploadingAddQImage(true);
+      const url = await uploadImageToCloudinary(file);
+      setQImageUrl(url);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "فشل رفع صورة السؤال");
+    } finally {
+      setUploadingAddQImage(false);
+      if (addQImageInputRef.current) addQImageInputRef.current.value = "";
+    }
+  }
+
+  async function handleUploadAddAnswerImage(file?: File | null) {
+    if (!file) return;
+    try {
+      setUploadingAddAImage(true);
+      const url = await uploadImageToCloudinary(file);
+      setAImageUrl(url);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "فشل رفع صورة الإجابة");
+    } finally {
+      setUploadingAddAImage(false);
+      if (addAImageInputRef.current) addAImageInputRef.current.value = "";
+    }
+  }
+
+  async function handleUploadEditQuestionImage(file?: File | null) {
+    if (!file) return;
+    try {
+      setUploadingEditQImage(true);
+      const url = await uploadImageToCloudinary(file);
+      setEditQImageUrl(url);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "فشل رفع صورة السؤال");
+    } finally {
+      setUploadingEditQImage(false);
+      if (editQImageInputRef.current) editQImageInputRef.current.value = "";
+    }
+  }
+
+  async function handleUploadEditAnswerImage(file?: File | null) {
+    if (!file) return;
+    try {
+      setUploadingEditAImage(true);
+      const url = await uploadImageToCloudinary(file);
+      setEditAImageUrl(url);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "فشل رفع صورة الإجابة");
+    } finally {
+      setUploadingEditAImage(false);
+      if (editAImageInputRef.current) editAImageInputRef.current.value = "";
+    }
+  }
 
   async function addQuestion() {
     if (!selectedSectionId) return alert("اختر تصنيف أولًا");
@@ -241,19 +344,22 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
     const fl = answerFirstLetter.trim();
     if (fl && fl.length > 1) return alert("أول حرف يكون حرف واحد فقط");
 
-    await addDoc(collection(db, "packs", activePackId, "categories", selectedCatId, "questions"), {
-      text: qt,
-      points: qPoints,
-      imageUrl: qImageUrl.trim() || "",
-      videoUrl: qVideoUrl.trim() || "",
-      answerText: at,
-      answerImageUrl: aImageUrl.trim() || "",
-      answerVideoUrl: aVideoUrl.trim() || "",
-      answerFirstLetter: fl || "",
-      hintLetter: fl || "",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    await addDoc(
+      collection(db, "packs", activePackId, "categories", selectedCatId, "questions"),
+      {
+        text: qt,
+        points: qPoints,
+        imageUrl: qImageUrl.trim() || "",
+        videoUrl: qVideoUrl.trim() || "",
+        answerText: at,
+        answerImageUrl: aImageUrl.trim() || "",
+        answerVideoUrl: aVideoUrl.trim() || "",
+        answerFirstLetter: fl || "",
+        hintLetter: fl || "",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }
+    );
 
     setQText("");
     setQPoints(200);
@@ -288,18 +394,21 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
     const fl = editAnswerFirstLetter.trim();
     if (fl && fl.length > 1) return alert("أول حرف يكون حرف واحد فقط");
 
-    await updateDoc(doc(db, "packs", activePackId, "categories", selectedCatId, "questions", editingQId), {
-      text: qt,
-      points: editQPoints,
-      imageUrl: editQImageUrl.trim() || "",
-      videoUrl: editQVideoUrl.trim() || "",
-      answerText: at,
-      answerImageUrl: editAImageUrl.trim() || "",
-      answerVideoUrl: editAVideoUrl.trim() || "",
-      answerFirstLetter: fl || "",
-      hintLetter: fl || "",
-      updatedAt: serverTimestamp(),
-    });
+    await updateDoc(
+      doc(db, "packs", activePackId, "categories", selectedCatId, "questions", editingQId),
+      {
+        text: qt,
+        points: editQPoints,
+        imageUrl: editQImageUrl.trim() || "",
+        videoUrl: editQVideoUrl.trim() || "",
+        answerText: at,
+        answerImageUrl: editAImageUrl.trim() || "",
+        answerVideoUrl: editAVideoUrl.trim() || "",
+        answerFirstLetter: fl || "",
+        hintLetter: fl || "",
+        updatedAt: serverTimestamp(),
+      }
+    );
 
     setEditingQId(null);
   }
@@ -308,15 +417,22 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
     if (!selectedCatId) return;
     if (!confirm("متأكد تبغى تحذف السؤال؟")) return;
 
-    await deleteDoc(doc(db, "packs", activePackId, "categories", selectedCatId, "questions", qId));
+    await deleteDoc(
+      doc(db, "packs", activePackId, "categories", selectedCatId, "questions", qId)
+    );
   }
 
-  const addHasPreview = qImageUrl.trim() || qVideoUrl.trim() || aImageUrl.trim() || aVideoUrl.trim();
-  const editHasPreview = editQImageUrl.trim() || editQVideoUrl.trim() || editAImageUrl.trim() || editAVideoUrl.trim();
+  const addHasPreview =
+    qImageUrl.trim() || qVideoUrl.trim() || aImageUrl.trim() || aVideoUrl.trim();
+
+  const editHasPreview =
+    editQImageUrl.trim() ||
+    editQVideoUrl.trim() ||
+    editAImageUrl.trim() ||
+    editAVideoUrl.trim();
 
   return (
     <section className={styles.content}>
-      {/* اختيار التصنيف + الفئة */}
       <div className={styles.card}>
         <div className={styles.cardHeader}>
           <h2 className={styles.h2}>اختيار التصنيف والفئة</h2>
@@ -326,7 +442,12 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
         <div className={styles.grid3}>
           <div className={styles.field}>
             <label className={styles.label}>التصنيف</label>
-            <select className={styles.input} value={selectedSectionId} onChange={(e) => setSelectedSectionId(e.target.value)} disabled={sectionsLoading}>
+            <select
+              className={styles.input}
+              value={selectedSectionId}
+              onChange={(e) => setSelectedSectionId(e.target.value)}
+              disabled={sectionsLoading}
+            >
               {sectionsLoading ? (
                 <option value="">جاري التحميل…</option>
               ) : sections.length === 0 ? (
@@ -343,7 +464,12 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
 
           <div className={styles.field} style={{ gridColumn: "span 2" }}>
             <label className={styles.label}>الفئة</label>
-            <select className={styles.input} value={selectedCatId} onChange={(e) => setSelectedCatId(e.target.value)} disabled={catsLoading || !selectedSectionId}>
+            <select
+              className={styles.input}
+              value={selectedCatId}
+              onChange={(e) => setSelectedCatId(e.target.value)}
+              disabled={catsLoading || !selectedSectionId}
+            >
               {!selectedSectionId ? (
                 <option value="">اختر تصنيف أولًا</option>
               ) : catsLoading ? (
@@ -362,22 +488,29 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
         </div>
       </div>
 
-      {/* إضافة سؤال */}
       <div className={styles.card}>
         <div className={styles.cardHeader}>
           <h2 className={styles.h2}>إضافة سؤال + إجابة</h2>
-          <div className={styles.muted}>روابط فقط (صور/فيديو)</div>
+          <div className={styles.muted}>تقدر ترفع الصور من الجهاز مباشرة</div>
         </div>
 
         <div className={styles.field}>
           <label className={styles.label}>نص السؤال</label>
-          <textarea className={styles.textarea} value={qText} onChange={(e) => setQText(e.target.value)} />
+          <textarea
+            className={styles.textarea}
+            value={qText}
+            onChange={(e) => setQText(e.target.value)}
+          />
         </div>
 
         <div className={styles.grid3}>
           <div className={styles.field}>
             <label className={styles.label}>النقاط</label>
-            <select className={styles.input} value={qPoints} onChange={(e) => setQPoints(Number(e.target.value) as any)}>
+            <select
+              className={styles.input}
+              value={qPoints}
+              onChange={(e) => setQPoints(Number(e.target.value) as any)}
+            >
               {POINTS.map((p) => (
                 <option key={p} value={p}>
                   {p}
@@ -387,36 +520,103 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
           </div>
 
           <div className={styles.field}>
-            <label className={styles.label}>رابط صورة السؤال</label>
-            <input className={styles.input} value={qImageUrl} onChange={(e) => setQImageUrl(e.target.value)} />
+            <label className={styles.label}>صورة السؤال</label>
+
+            <input
+              ref={addQImageInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => void handleUploadAddQuestionImage(e.target.files?.[0] || null)}
+            />
+
+            <div className={styles.row}>
+              <button
+                type="button"
+                className={styles.btnSmall}
+                onClick={() => addQImageInputRef.current?.click()}
+                disabled={uploadingAddQImage}
+              >
+                {uploadingAddQImage ? "جاري رفع الصورة..." : "رفع صورة السؤال"}
+              </button>
+            </div>
+
+            <input
+              className={styles.input}
+              value={qImageUrl}
+              onChange={(e) => setQImageUrl(e.target.value)}
+              placeholder="سيظهر رابط الصورة هنا تلقائيًا"
+            />
           </div>
 
           <div className={styles.field}>
             <label className={styles.label}>رابط فيديو السؤال</label>
-            <input className={styles.input} value={qVideoUrl} onChange={(e) => setQVideoUrl(e.target.value)} />
+            <input
+              className={styles.input}
+              value={qVideoUrl}
+              onChange={(e) => setQVideoUrl(e.target.value)}
+            />
           </div>
         </div>
 
         <div className={styles.grid3}>
           <div className={styles.field}>
             <label className={styles.label}>الإجابة (نص)</label>
-            <input className={styles.input} value={aText} onChange={(e) => setAText(e.target.value)} />
+            <input
+              className={styles.input}
+              value={aText}
+              onChange={(e) => setAText(e.target.value)}
+            />
           </div>
 
           <div className={styles.field}>
-            <label className={styles.label}>رابط صورة الإجابة</label>
-            <input className={styles.input} value={aImageUrl} onChange={(e) => setAImageUrl(e.target.value)} />
+            <label className={styles.label}>صورة الإجابة</label>
+
+            <input
+              ref={addAImageInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => void handleUploadAddAnswerImage(e.target.files?.[0] || null)}
+            />
+
+            <div className={styles.row}>
+              <button
+                type="button"
+                className={styles.btnSmall}
+                onClick={() => addAImageInputRef.current?.click()}
+                disabled={uploadingAddAImage}
+              >
+                {uploadingAddAImage ? "جاري رفع الصورة..." : "رفع صورة الإجابة"}
+              </button>
+            </div>
+
+            <input
+              className={styles.input}
+              value={aImageUrl}
+              onChange={(e) => setAImageUrl(e.target.value)}
+              placeholder="سيظهر رابط الصورة هنا تلقائيًا"
+            />
           </div>
 
           <div className={styles.field}>
             <label className={styles.label}>رابط فيديو الإجابة</label>
-            <input className={styles.input} value={aVideoUrl} onChange={(e) => setAVideoUrl(e.target.value)} />
+            <input
+              className={styles.input}
+              value={aVideoUrl}
+              onChange={(e) => setAVideoUrl(e.target.value)}
+            />
           </div>
         </div>
 
         <div className={styles.field}>
           <label className={styles.label}>أول حرف من الإجابة</label>
-          <input className={styles.input} value={answerFirstLetter} onChange={(e) => setAnswerFirstLetter(e.target.value)} placeholder="مثال: أ" />
+          <input
+            className={styles.input}
+            value={answerFirstLetter}
+            onChange={(e) => setAnswerFirstLetter(e.target.value)}
+            placeholder="مثال: أ"
+          />
         </div>
 
         {addHasPreview ? (
@@ -458,13 +658,16 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
         ) : null}
 
         <div className={styles.row}>
-          <button className={styles.primaryBtn} onClick={addQuestion} disabled={!selectedSectionId || !selectedCatId}>
+          <button
+            className={styles.primaryBtn}
+            onClick={addQuestion}
+            disabled={!selectedSectionId || !selectedCatId}
+          >
             إضافة السؤال
           </button>
         </div>
       </div>
 
-      {/* قائمة الأسئلة */}
       <div className={styles.card}>
         <div className={styles.cardHeader}>
           <h2 className={styles.h2}>قائمة الأسئلة</h2>
@@ -501,7 +704,10 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
                           <img className={styles.inlineImg} src={q.imageUrl} alt="q" />
                         ) : null}
                         {q.videoUrl ? (
-                          <div className={styles.muted} style={{ marginTop: 6, wordBreak: "break-all" }}>
+                          <div
+                            className={styles.muted}
+                            style={{ marginTop: 6, wordBreak: "break-all" }}
+                          >
                             {q.videoUrl}
                           </div>
                         ) : null}
@@ -515,19 +721,29 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
                           <img className={styles.inlineImg} src={q.answerImageUrl} alt="a" />
                         ) : null}
                         {q.answerVideoUrl ? (
-                          <div className={styles.muted} style={{ marginTop: 6, wordBreak: "break-all" }}>
+                          <div
+                            className={styles.muted}
+                            style={{ marginTop: 6, wordBreak: "break-all" }}
+                          >
                             {q.answerVideoUrl}
                           </div>
                         ) : null}
                       </div>
                     </td>
-                    <td>{(q.answerFirstLetter || q.hintLetter || "").trim() ? (q.answerFirstLetter || q.hintLetter) : "—"}</td>
+                    <td>
+                      {(q.answerFirstLetter || q.hintLetter || "").trim()
+                        ? q.answerFirstLetter || q.hintLetter
+                        : "—"}
+                    </td>
                     <td>
                       <div className={styles.row}>
                         <button className={styles.btnSmall} onClick={() => startEditQuestion(q)}>
                           تعديل
                         </button>
-                        <button className={styles.dangerBtnSmall} onClick={() => removeQuestion(q.id)}>
+                        <button
+                          className={styles.dangerBtnSmall}
+                          onClick={() => removeQuestion(q.id)}
+                        >
                           حذف
                         </button>
                       </div>
@@ -540,7 +756,6 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
         )}
       </div>
 
-      {/* تعديل سؤال */}
       {editingQ && (
         <div className={styles.modalOverlay} onMouseDown={() => setEditingQId(null)}>
           <div className={styles.modal} onMouseDown={(e) => e.stopPropagation()}>
@@ -553,13 +768,21 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
 
             <div className={styles.field}>
               <label className={styles.label}>نص السؤال</label>
-              <textarea className={styles.textarea} value={editQText} onChange={(e) => setEditQText(e.target.value)} />
+              <textarea
+                className={styles.textarea}
+                value={editQText}
+                onChange={(e) => setEditQText(e.target.value)}
+              />
             </div>
 
             <div className={styles.grid3}>
               <div className={styles.field}>
                 <label className={styles.label}>النقاط</label>
-                <select className={styles.input} value={editQPoints} onChange={(e) => setEditQPoints(Number(e.target.value) as any)}>
+                <select
+                  className={styles.input}
+                  value={editQPoints}
+                  onChange={(e) => setEditQPoints(Number(e.target.value) as any)}
+                >
                   {POINTS.map((p) => (
                     <option key={p} value={p}>
                       {p}
@@ -569,36 +792,107 @@ export default function QuestionsTab({ activePackId }: { activePackId: string })
               </div>
 
               <div className={styles.field}>
-                <label className={styles.label}>رابط صورة السؤال</label>
-                <input className={styles.input} value={editQImageUrl} onChange={(e) => setEditQImageUrl(e.target.value)} />
+                <label className={styles.label}>صورة السؤال</label>
+
+                <input
+                  ref={editQImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) =>
+                    void handleUploadEditQuestionImage(e.target.files?.[0] || null)
+                  }
+                />
+
+                <div className={styles.row}>
+                  <button
+                    type="button"
+                    className={styles.btnSmall}
+                    onClick={() => editQImageInputRef.current?.click()}
+                    disabled={uploadingEditQImage}
+                  >
+                    {uploadingEditQImage ? "جاري رفع الصورة..." : "رفع صورة السؤال"}
+                  </button>
+                </div>
+
+                <input
+                  className={styles.input}
+                  value={editQImageUrl}
+                  onChange={(e) => setEditQImageUrl(e.target.value)}
+                  placeholder="سيظهر رابط الصورة هنا تلقائيًا"
+                />
               </div>
 
               <div className={styles.field}>
                 <label className={styles.label}>رابط فيديو السؤال</label>
-                <input className={styles.input} value={editQVideoUrl} onChange={(e) => setEditQVideoUrl(e.target.value)} />
+                <input
+                  className={styles.input}
+                  value={editQVideoUrl}
+                  onChange={(e) => setEditQVideoUrl(e.target.value)}
+                />
               </div>
             </div>
 
             <div className={styles.grid3}>
               <div className={styles.field}>
                 <label className={styles.label}>الإجابة (نص)</label>
-                <input className={styles.input} value={editAText} onChange={(e) => setEditAText(e.target.value)} />
+                <input
+                  className={styles.input}
+                  value={editAText}
+                  onChange={(e) => setEditAText(e.target.value)}
+                />
               </div>
 
               <div className={styles.field}>
-                <label className={styles.label}>رابط صورة الإجابة</label>
-                <input className={styles.input} value={editAImageUrl} onChange={(e) => setEditAImageUrl(e.target.value)} />
+                <label className={styles.label}>صورة الإجابة</label>
+
+                <input
+                  ref={editAImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) =>
+                    void handleUploadEditAnswerImage(e.target.files?.[0] || null)
+                  }
+                />
+
+                <div className={styles.row}>
+                  <button
+                    type="button"
+                    className={styles.btnSmall}
+                    onClick={() => editAImageInputRef.current?.click()}
+                    disabled={uploadingEditAImage}
+                  >
+                    {uploadingEditAImage ? "جاري رفع الصورة..." : "رفع صورة الإجابة"}
+                  </button>
+                </div>
+
+                <input
+                  className={styles.input}
+                  value={editAImageUrl}
+                  onChange={(e) => setEditAImageUrl(e.target.value)}
+                  placeholder="سيظهر رابط الصورة هنا تلقائيًا"
+                />
               </div>
 
               <div className={styles.field}>
                 <label className={styles.label}>رابط فيديو الإجابة</label>
-                <input className={styles.input} value={editAVideoUrl} onChange={(e) => setEditAVideoUrl(e.target.value)} />
+                <input
+                  className={styles.input}
+                  value={editAVideoUrl}
+                  onChange={(e) => setEditAVideoUrl(e.target.value)}
+                />
               </div>
             </div>
 
             <div className={styles.field}>
               <label className={styles.label}>أول حرف من الإجابة</label>
-              <input className={styles.input} value={editAnswerFirstLetter} onChange={(e) => setEditAnswerFirstLetter(e.target.value)} placeholder="مثال: أ" />
+              <input
+                className={styles.input}
+                value={editAnswerFirstLetter}
+                onChange={(e) => setEditAnswerFirstLetter(e.target.value)}
+                placeholder="مثال: أ"
+              />
             </div>
 
             {editHasPreview ? (
