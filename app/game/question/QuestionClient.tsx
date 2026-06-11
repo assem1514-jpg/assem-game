@@ -37,6 +37,7 @@ function loadGame() {
     return null;
   }
 }
+
 function saveGame(data: any) {
   localStorage.setItem(LS_KEY, JSON.stringify(data));
 }
@@ -69,7 +70,11 @@ type Lifelines = {
 };
 
 function getLifelines(game: any, teamIndex: number): Lifelines {
-  const base: Lifelines = { twoAnswers: false, firstLetter: false, callFriend: false };
+  const base: Lifelines = {
+    twoAnswers: false,
+    firstLetter: false,
+    callFriend: false,
+  };
   const map = game?.lifelines || {};
   return { ...base, ...(map?.[teamIndex] || {}) };
 }
@@ -131,7 +136,10 @@ export default function QuestionPage() {
   const [timerRunning, setTimerRunning] = useState<boolean>(false);
 
   const [openHelp, setOpenHelp] = useState(false);
-  const [activeLifelines, setActiveLifelines] = useState<{ twoAnswers: boolean; callFriend: boolean }>({
+  const [activeLifelines, setActiveLifelines] = useState<{
+    twoAnswers: boolean;
+    callFriend: boolean;
+  }>({
     twoAnswers: false,
     callFriend: false,
   });
@@ -211,9 +219,11 @@ export default function QuestionPage() {
     const updateViewport = () => {
       setViewport({ w: window.innerWidth, h: window.innerHeight });
     };
+
     updateViewport();
     window.addEventListener("resize", updateViewport);
     window.addEventListener("orientationchange", updateViewport);
+
     return () => {
       window.removeEventListener("resize", updateViewport);
       window.removeEventListener("orientationchange", updateViewport);
@@ -240,13 +250,17 @@ export default function QuestionPage() {
         setCatName("");
         return;
       }
+
       try {
         const ref = doc(db, "packs", packId, "categories", catId);
         const snap = await getDoc(ref);
+
         if (!cancelled) {
           if (snap.exists()) {
             const data = snap.data() as any;
-            const name = (data?.name ?? data?.title ?? data?.catName ?? "").toString().trim();
+            const name = (data?.name ?? data?.title ?? data?.catName ?? "")
+              .toString()
+              .trim();
             setCatName(name);
           } else {
             setCatName("");
@@ -283,9 +297,12 @@ export default function QuestionPage() {
       setActiveLifelines({ twoAnswers: false, callFriend: false });
 
       try {
-        const allSnap = await getDocs(collection(db, "packs", packId, "categories", catId, "questions"));
+        const allSnap = await getDocs(
+          collection(db, "packs", packId, "categories", catId, "questions")
+        );
 
         const allCandidates: QuestionDoc[] = [];
+
         allSnap.forEach((d) => {
           const data = d.data() as any;
           const p = Number(data.points ?? 0);
@@ -300,7 +317,13 @@ export default function QuestionPage() {
             answerText: data.answerText ?? "",
             answerImageUrl: data.answerImageUrl ?? "",
             answerFirstLetter:
-              (data.answerFirstLetter ?? data.firstLetter ?? data.answerLetter ?? data.firstChar ?? "")?.toString() ?? "",
+              (
+                data.answerFirstLetter ??
+                data.firstLetter ??
+                data.answerLetter ??
+                data.firstChar ??
+                ""
+              )?.toString() ?? "",
           });
         });
 
@@ -313,6 +336,7 @@ export default function QuestionPage() {
         );
 
         let userSeenIds = new Set<string>();
+
         if (user?.uid) {
           try {
             const qs = query(
@@ -321,17 +345,26 @@ export default function QuestionPage() {
               where("catId", "==", catId),
               where("points", "==", pts)
             );
+
             const seenSnap = await getDocs(qs);
+
             seenSnap.forEach((sd) => {
               const dd = sd.data() as any;
               if (dd?.qid) userSeenIds.add(String(dd.qid));
             });
           } catch {
             try {
-              const seenSnap = await getDocs(collection(db, "users", user.uid, "seenQuestions"));
+              const seenSnap = await getDocs(
+                collection(db, "users", user.uid, "seenQuestions")
+              );
+
               seenSnap.forEach((sd) => {
                 const dd = sd.data() as any;
-                if (dd?.packId === packId && dd?.catId === catId && Number(dd?.points ?? 0) === pts) {
+                if (
+                  dd?.packId === packId &&
+                  dd?.catId === catId &&
+                  Number(dd?.points ?? 0) === pts
+                ) {
                   if (dd?.qid) userSeenIds.add(String(dd.qid));
                 }
               });
@@ -356,6 +389,7 @@ export default function QuestionPage() {
             if (localSeenIds.has(id)) return false;
             return true;
           });
+
           chosen = pickRandom(filteredLocalOnly) || pickRandom(allCandidates);
         }
 
@@ -379,7 +413,13 @@ export default function QuestionPage() {
             const seenId = `${catId}_${pts}_${chosen._id}`;
             await setDoc(
               doc(db, "users", user.uid, "seenQuestions", seenId),
-              { packId, catId, qid: chosen._id, points: pts, seenAt: serverTimestamp() },
+              {
+                packId,
+                catId,
+                qid: chosen._id,
+                points: pts,
+                seenAt: serverTimestamp(),
+              },
               { merge: true }
             );
           } catch {}
@@ -422,7 +462,11 @@ export default function QuestionPage() {
     if (secondsLeft === 0) setTimerRunning(false);
   }, [secondsLeft, question, showAnswer]);
 
-  const catTitle = useMemo(() => ((catName || "").trim() ? catName : "…"), [catName]);
+  const catTitle = useMemo(() => {
+    return (catName || "").trim() ? catName : "…";
+  }, [catName]);
+
+  const activePoints = Number(question?.points || pts || 0);
 
   function backToBoard() {
     const sessionPart = sessionCode ? `&session=${encodeURIComponent(sessionCode)}` : "";
@@ -448,23 +492,29 @@ export default function QuestionPage() {
 
   async function awardToTeam(teamIndex: number) {
     if (!game) return;
+
     const updated = { ...game };
+
     updated.teams = (updated.teams || []).map((t: Team, i: number) =>
-      i === teamIndex ? { ...t, score: (t.score || 0) + pts } : t
+      i === teamIndex ? { ...t, score: (t.score || 0) + activePoints } : t
     );
+
     setOpenWinners(false);
     await markUsedAndBack(updated);
   }
 
   async function nobodyAnswered() {
     if (!game) return;
+
     const updated = { ...game };
+
     setOpenWinners(false);
     await markUsedAndBack(updated);
   }
 
   async function showAnswerNow() {
     if (!game) return;
+
     setShowAnswer(true);
     setTimerRunning(false);
 
@@ -480,22 +530,25 @@ export default function QuestionPage() {
 
   async function useTwoAnswers() {
     if (!game) return;
+
     const updated = { ...game };
     setLifelines(updated, currentTeamIndex, { twoAnswers: true });
+
     await persistGame(updated);
     setActiveLifelines((p) => ({ ...p, twoAnswers: true }));
   }
 
   async function useCallFriend() {
     if (!game) return;
+
     const updated = { ...game };
     setLifelines(updated, currentTeamIndex, { callFriend: true });
+
     await persistGame(updated);
     setActiveLifelines((p) => ({ ...p, callFriend: true }));
   }
 
   async function changeQuestionAny() {
-    if (!pts) return;
     try {
       setLoading(true);
       setShowAnswer(false);
@@ -504,42 +557,66 @@ export default function QuestionPage() {
       setSecondsLeft(DEFAULT_SECONDS);
       setTimerRunning(false);
 
-      const qRef = query(collectionGroup(db, "questions"), where("points", "==", pts), limit(60));
+      const qRef = query(collectionGroup(db, "questions"), limit(150));
       const snap = await getDocs(qRef);
 
       const pool: QuestionDoc[] = [];
+
       snap.forEach((d) => {
         const data = d.data() as any;
         const qid2 = d.id;
         const catId2 = parseCatIdFromQuestionPath(d.ref.path);
+        const p = Number(data.points ?? 0);
+
+        if (!p) return;
 
         pool.push({
           _id: qid2,
           _catId: catId2,
           text: data.text ?? "",
-          points: Number(data.points ?? pts),
+          points: p,
           imageUrl: data.imageUrl ?? "",
           answerText: data.answerText ?? "",
           answerImageUrl: data.answerImageUrl ?? "",
           answerFirstLetter:
-            (data.answerFirstLetter ?? data.firstLetter ?? data.answerLetter ?? data.firstChar ?? "")?.toString() ?? "",
+            (
+              data.answerFirstLetter ??
+              data.firstLetter ??
+              data.answerLetter ??
+              data.firstChar ??
+              ""
+            )?.toString() ?? "",
         });
       });
 
-      const picked = pickRandom(pool);
+      const seen: Record<string, true> = game?.seenQuestions || {};
+
+      const filtered = pool.filter((qItem) => {
+        if (!qItem._id || !qItem._catId) return false;
+        const key = `${packId}:${qItem._catId}:${qItem.points}:${qItem._id}`;
+        return !seen[key];
+      });
+
+      const picked = pickRandom(filtered) || pickRandom(pool);
 
       if (!picked) {
-        alert("ما لقيت سؤال بنفس النقاط.");
+        alert("ما لقيت أسئلة في الداشبورد.");
         setLoading(false);
         return;
       }
 
       if (picked._catId) {
         try {
-          const cSnap = await getDoc(doc(db, "packs", packId, "categories", picked._catId));
+          const cSnap = await getDoc(
+            doc(db, "packs", packId, "categories", picked._catId)
+          );
+
           if (cSnap.exists()) {
             const cd = cSnap.data() as any;
-            const name = (cd?.name ?? cd?.title ?? cd?.catName ?? "").toString().trim();
+            const name = (cd?.name ?? cd?.title ?? cd?.catName ?? "")
+              .toString()
+              .trim();
+
             setCatName(name || "");
           }
         } catch {}
@@ -547,16 +624,26 @@ export default function QuestionPage() {
 
       const updated = { ...(game || {}) };
       updated.seenQuestions = updated.seenQuestions || {};
-      const prefix = `${packId}:${picked._catId || "any"}:${pts}:`;
-      if (picked._id) updated.seenQuestions[`${prefix}${picked._id}`] = true;
+
+      if (picked._id && picked._catId) {
+        updated.seenQuestions[`${packId}:${picked._catId}:${picked.points}:${picked._id}`] = true;
+      }
+
       await persistGame(updated);
 
       if (user?.uid && picked._id) {
         try {
-          const seenId = `${picked._catId || "any"}_${pts}_${picked._id}`;
+          const seenId = `${picked._catId || "any"}_${picked.points}_${picked._id}`;
+
           await setDoc(
             doc(db, "users", user.uid, "seenQuestions", seenId),
-            { packId, catId: picked._catId || "any", qid: picked._id, points: pts, seenAt: serverTimestamp() },
+            {
+              packId,
+              catId: picked._catId || "any",
+              qid: picked._id,
+              points: picked.points,
+              seenAt: serverTimestamp(),
+            },
             { merge: true }
           );
         } catch {}
@@ -577,12 +664,14 @@ export default function QuestionPage() {
     if (!question) return;
     if (showAnswer) return;
     if (secondsLeft === 0) return;
+
     setTimerRunning((v) => !v);
   }
 
   function resetTimer() {
     if (!question) return;
     if (showAnswer) return;
+
     setSecondsLeft(DEFAULT_SECONDS);
     setTimerRunning(true);
   }
@@ -593,7 +682,11 @@ export default function QuestionPage() {
         <div className={styles.fitWrap}>
           <div
             className={styles.stageScale}
-            style={{ width: `${STAGE_W}px`, height: `${STAGE_H}px`, transform: `scale(${stageScale})` }}
+            style={{
+              width: `${STAGE_W}px`,
+              height: `${STAGE_H}px`,
+              transform: `scale(${stageScale})`,
+            }}
           >
             <div className={styles.stage} style={{ display: "grid", placeItems: "center" }}>
               ما فيه لعبة شغالة. ارجع للفئات وابدأ لعبة جديدة.
@@ -605,6 +698,7 @@ export default function QuestionPage() {
   }
 
   const lifelines = getLifelines(game, currentTeamIndex);
+  const allTeams = ((game?.teams || []) as Team[]);
 
   return (
     <div className={styles.page}>
@@ -618,29 +712,42 @@ export default function QuestionPage() {
           }}
         >
           <div className={styles.stage}>
-            <header className={styles.fanousHeader}>
+            <header className={styles.topHeader}>
               <div className={styles.turnPill}>
-                <span>دور الفريق:</span>
-                <b style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  {currentTeam?.icon ? renderTeamIcon(currentTeam.icon, 18) : null}
+                <Icon icon="mdi:swap-horizontal" width={28} height={28} />
+                <span>دور فريق:</span>
+                <b>
+                  {currentTeam?.icon ? renderTeamIcon(currentTeam.icon, 24) : null}
                   {currentTeam?.name ?? "—"}
                 </b>
               </div>
 
-              <div className={styles.brandCenter}>
+              <div className={styles.headerLogoWrap}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img className={styles.bigLogo} src="/logo.png" alt="logo" />
+                <img src="/logo.png" alt="مستوى" className={styles.headerLogo} />
               </div>
 
-              <button className={styles.closeBtn} onClick={backToBoard} type="button" title="إغلاق">
+              <button
+                className={styles.closeBtn}
+                onClick={backToBoard}
+                type="button"
+                title="إغلاق"
+              >
                 ✕
               </button>
             </header>
 
-            <main className={styles.mainWrap}>
-              <section className={styles.questionShell}>
-                <div className={styles.shellTopRow}>
-                  <div className={styles.pointsPill}>{pts} نقطة</div>
+            <main className={styles.gameLayout}>
+              <section className={styles.questionPanel}>
+                <div className={styles.panelTopLine}>
+                  <button
+                    type="button"
+                    className={styles.reportBtn}
+                    onClick={() => alert("تم استلام البلاغ")}
+                    title="إبلاغ"
+                  >
+                    إبلاغ
+                  </button>
 
                   <div className={styles.timerPill}>
                     <button
@@ -650,7 +757,7 @@ export default function QuestionPage() {
                       title={timerRunning ? "إيقاف" : "تشغيل"}
                       className={styles.timerIconBtn}
                     >
-                      <Icon icon={timerRunning ? "mdi:pause" : "mdi:play"} width="22" height="22" />
+                      <Icon icon={timerRunning ? "mdi:pause" : "mdi:play"} width="24" height="24" />
                     </button>
 
                     <div className={styles.timerText}>{formatMMSS(secondsLeft)}</div>
@@ -662,19 +769,11 @@ export default function QuestionPage() {
                       title="إعادة"
                       className={styles.timerIconBtn}
                     >
-                      <Icon icon="mdi:restart" width="22" height="22" />
+                      <Icon icon="mdi:restart" width="24" height="24" />
                     </button>
                   </div>
 
-                  <button
-                    type="button"
-                    className={styles.fazaaBtn}
-                    onClick={() => setOpenHelp(true)}
-                    disabled={!question || showAnswer}
-                    title="فزعة ارتشاف"
-                  >
-                    فزعة ارتشاف
-                  </button>
+                  <div className={styles.pointsPill}>النقاط: {activePoints}</div>
                 </div>
 
                 <div className={styles.catTitleBar}>{catTitle}</div>
@@ -682,13 +781,13 @@ export default function QuestionPage() {
                 {loading ? (
                   <div className={styles.qTitle}>جاري التحميل…</div>
                 ) : !question ? (
-                  <div className={styles.qTitle}>ما فيه سؤال بهذه النقاط داخل هذه الفئة.</div>
+                  <div className={styles.qTitle}>
+                    ما فيه سؤال بهذه النقاط داخل هذه الفئة.
+                  </div>
                 ) : !showAnswer ? (
                   <div className={styles.qTitle}>{question.text}</div>
                 ) : (
-                  <div className={styles.qTitle} style={{ fontSize: 34 }}>
-                    {question.answerText || "—"}
-                  </div>
+                  <div className={styles.qTitle}>{question.answerText || "—"}</div>
                 )}
 
                 <div className={styles.contentArea}>
@@ -738,34 +837,137 @@ export default function QuestionPage() {
                 {!loading && question ? (
                   !showAnswer ? (
                     <div className={styles.bottomActions}>
-                      <button className={styles.backBtn} onClick={backToBoard} type="button">
-                        رجوع
+                      <button
+                        className={styles.answerBtn}
+                        onClick={showAnswerNow}
+                        type="button"
+                      >
+                        الجواب
                       </button>
 
-                      <button className={styles.answerBtn} onClick={showAnswerNow} type="button">
-                        الإجابة
+                      <button
+                        className={styles.backBtn}
+                        onClick={backToBoard}
+                        type="button"
+                      >
+                        رجوع
                       </button>
                     </div>
                   ) : (
                     <div className={styles.bottomActions}>
-                      <button className={styles.backBtn} onClick={backToQuestionView} type="button">
-                        الرجوع للسؤال
+                      <button
+                        className={styles.whoBtn}
+                        onClick={() => setOpenWinners(true)}
+                        type="button"
+                      >
+                        من جاوب صح؟
                       </button>
 
-                      <button className={styles.whoBtn} onClick={() => setOpenWinners(true)} type="button">
-                        من جاوب صح؟
+                      <button
+                        className={styles.backBtn}
+                        onClick={backToQuestionView}
+                        type="button"
+                      >
+                        الرجوع للسؤال
                       </button>
                     </div>
                   )
                 ) : null}
               </section>
+
+              <aside className={styles.sidePanel}>
+                <div className={styles.logoBox}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/ertishaf-logo.png" alt="ارتشاف" className={styles.sideLogo} />
+                </div>
+
+                <div className={styles.teamsList}>
+                  {allTeams.map((team, i) => {
+                    const teamLifelines = getLifelines(game, i);
+                    const isActive = i === currentTeamIndex;
+
+                    return (
+                      <div
+                        key={i}
+                        className={`${styles.teamCard} ${isActive ? styles.activeTeamCard : ""}`}
+                      >
+                        <div className={styles.teamNameRow}>
+                          <span className={styles.teamIcon}>
+                            {team.icon ? (
+                              renderTeamIcon(team.icon, 26)
+                            ) : (
+                              <Icon icon="mdi:account-group" width={26} height={26} />
+                            )}
+                          </span>
+
+                          <span className={styles.teamName}>
+                            {team.name || `الفريق ${i + 1}`}
+                          </span>
+                        </div>
+
+                        <div className={styles.teamScore}>{Number(team.score || 0)}</div>
+
+                        <div className={styles.assistTitle}>فزعة ارتشاف</div>
+
+                        <div className={styles.assistRow}>
+                          <button
+                            type="button"
+                            className={`${styles.assistBtn} ${teamLifelines.twoAnswers ? styles.assistUsed : ""}`}
+                            disabled={
+                              teamLifelines.twoAnswers ||
+                              showAnswer ||
+                              !question ||
+                              i !== currentTeamIndex
+                            }
+                            onClick={() => {
+                              void useTwoAnswers();
+                            }}
+                            title="إجابتين"
+                          >
+                            <Icon icon="mdi:numeric-2-circle" width={22} height={22} />
+                          </button>
+
+                          <button
+                            type="button"
+                            className={styles.assistBtn}
+                            disabled={showAnswer || !question || i !== currentTeamIndex}
+                            onClick={() => {
+                              void changeQuestionAny();
+                            }}
+                            title="غيّر السؤال"
+                          >
+                            <Icon icon="mdi:shuffle-variant" width={22} height={22} />
+                          </button>
+
+                          <button
+                            type="button"
+                            className={`${styles.assistBtn} ${teamLifelines.callFriend ? styles.assistUsed : ""}`}
+                            disabled={
+                              teamLifelines.callFriend ||
+                              showAnswer ||
+                              !question ||
+                              i !== currentTeamIndex
+                            }
+                            onClick={() => {
+                              void useCallFriend();
+                            }}
+                            title="اتصال بصديق"
+                          >
+                            <Icon icon="mdi:phone" width={22} height={22} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </aside>
             </main>
 
             {openHelp && (
               <div className={styles.modalBackdrop} onClick={() => setOpenHelp(false)}>
                 <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
                   <div className={styles.modalTitle}>فزعة ارتشاف</div>
-                  <div className={styles.modalSub}>اختر وسيلة مساعدة (تتطبق على هذا السؤال فقط)</div>
+                  <div className={styles.modalSub}>اختر وسيلة مساعدة</div>
 
                   <div className={styles.helpGrid}>
                     <button
@@ -807,7 +1009,11 @@ export default function QuestionPage() {
                     </button>
                   </div>
 
-                  <button type="button" className={styles.modalCancel} onClick={() => setOpenHelp(false)}>
+                  <button
+                    type="button"
+                    className={styles.modalCancel}
+                    onClick={() => setOpenHelp(false)}
+                  >
                     إغلاق
                   </button>
                 </div>
@@ -818,7 +1024,9 @@ export default function QuestionPage() {
               <div className={styles.modalBackdrop} onClick={() => setOpenWinners(false)}>
                 <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
                   <div className={styles.modalTitle}>الفريق اللي جاوب صح</div>
-                  <div className={styles.modalSub}>اختر الفريق اللي جاوب صح (أو محد جاوب)</div>
+                  <div className={styles.modalSub}>
+                    اختر الفريق اللي جاوب صح أو محد جاوب
+                  </div>
 
                   <div className={styles.winnersGrid}>
                     {(game?.teams || []).map((t: Team, i: number) => (
@@ -829,17 +1037,30 @@ export default function QuestionPage() {
                         type="button"
                         disabled={!showAnswer || !question}
                       >
-                        {t.icon ? <span style={{ marginInlineEnd: 8 }}>{renderTeamIcon(t.icon, 18)}</span> : null}
+                        {t.icon ? (
+                          <span style={{ marginInlineEnd: 8 }}>
+                            {renderTeamIcon(t.icon, 18)}
+                          </span>
+                        ) : null}
                         {t.name}
                       </button>
                     ))}
                   </div>
 
-                  <button className={styles.nobodyBtnModal} onClick={nobodyAnswered} type="button" disabled={!question || !showAnswer}>
+                  <button
+                    className={styles.nobodyBtnModal}
+                    onClick={nobodyAnswered}
+                    type="button"
+                    disabled={!question || !showAnswer}
+                  >
                     محد جاوب
                   </button>
 
-                  <button type="button" className={styles.modalCancel} onClick={() => setOpenWinners(false)}>
+                  <button
+                    type="button"
+                    className={styles.modalCancel}
+                    onClick={() => setOpenWinners(false)}
+                  >
                     إغلاق
                   </button>
                 </div>
@@ -851,11 +1072,16 @@ export default function QuestionPage() {
                 <div className={styles.imageFrame} onClick={(e) => e.stopPropagation()}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={!showAnswer ? (question.imageUrl || "") : (question.answerImageUrl || "")}
+                    src={!showAnswer ? question.imageUrl || "" : question.answerImageUrl || ""}
                     alt="zoom"
                     className={styles.imageFull}
                   />
-                  <button type="button" className={styles.imageClose} onClick={() => setOpenImage(false)}>
+
+                  <button
+                    type="button"
+                    className={styles.imageClose}
+                    onClick={() => setOpenImage(false)}
+                  >
                     إغلاق
                   </button>
                 </div>

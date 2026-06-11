@@ -2,15 +2,16 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+
 import { AuthProvider } from "@/lib/authContext";
 import OrientationGate from "./OrientationGate";
+import AppSplash from "./AppSplash";
 
 export const metadata: Metadata = {
   title: "مستوى",
   description: "لعبة مستوى",
 };
 
-// ✅ Next.js 16: لازم viewport يكون export لحاله (مو داخل metadata)
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
@@ -22,8 +23,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ar" dir="rtl">
       <body className="appRoot">
+        <AppSplash />
+
         <AuthProvider>
-          {/* ✅ يجبر اللعب أفقي: لو الجوال عمودي يطلع تنبيه */}
           <OrientationGate>{children}</OrientationGate>
         </AuthProvider>
       </body>

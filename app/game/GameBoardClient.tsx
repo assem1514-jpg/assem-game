@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import styles from "./page.module.css";
 
@@ -23,9 +23,9 @@ type Team = { name: string; score: number; icon?: string };
 type CatMeta = { id: string; name: string; imageUrl?: string };
 
 const LS_KEY = "assem_game_v1";
+const LS_RESULT_KEY = "mstawaa_result_v1";
 const POINTS_ROWS: Array<200 | 400 | 600> = [600, 400, 200];
 
-/* مقاس تصميم ثابت للوحة اللعبة */
 const STAGE_W = 1600;
 const STAGE_H = 900;
 
@@ -44,6 +44,11 @@ function saveGame(data: any) {
   localStorage.setItem(LS_KEY, JSON.stringify(data));
 }
 
+function saveResult(data: any) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(LS_RESULT_KEY, JSON.stringify(data));
+}
+
 function normalizeCatsParam(input: string) {
   let s = input || "";
   s = s.replace(/%2C/gi, ",");
@@ -58,13 +63,13 @@ export default function GameBoardClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
+  const resultSentRef = useRef(false);
+
   const [mounted, setMounted] = useState(false);
   const [game, setGame] = useState<any | null>(null);
   const [activePackId, setActivePackId] = useState<string>("main");
   const [turnIndex, setTurnIndex] = useState<number>(0);
-  const [openRoundEnd, setOpenRoundEnd] = useState(false);
   const [sessionDocId, setSessionDocId] = useState<string>("");
-
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
 
   const rawCats = normalizeCatsParam(sp.get("cats") || "");
@@ -186,12 +191,14 @@ export default function GameBoardClient() {
 
     const seen = new Set<string>();
     const unique: string[] = [];
+
     for (const id of arr) {
       if (!seen.has(id)) {
         seen.add(id);
         unique.push(id);
       }
     }
+
     return unique;
   }, [rawCats, game?.cats]);
 
@@ -285,6 +292,7 @@ export default function GameBoardClient() {
 
   const playableKeys = useMemo(() => {
     const keys: string[] = [];
+
     for (const catId of catIds) {
       for (const pts of [200, 400, 600] as const) {
         for (const idx of [0, 1] as const) {
@@ -293,6 +301,7 @@ export default function GameBoardClient() {
         }
       }
     }
+
     return keys;
   }, [catIds.join("|"), hasQuestion]);
 
@@ -302,26 +311,55 @@ export default function GameBoardClient() {
     return playableKeys.every((k: string) => !!used[k]);
   }, [questionsReady, playableKeys, used]);
 
+  const resultData = useMemo(() => {
+    const list = (teams || [])
+      .map((t: Team, index: number) => ({
+        index,
+        name: (t?.name || "").trim() || `فريق ${index + 1}`,
+        score: Number(t?.score || 0),
+        icon: t?.icon || "",
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    const max = list.length ? list[0].score : 0;
+    const winners = list.filter((t) => t.score === max);
+
+    return {
+      endedAt: Date.now(),
+      packId: activePackId,
+      cats: catIds,
+      teams: list,
+      winners,
+      max,
+      sessionCode,
+    };
+  }, [teams, activePackId, catIds.join("|"), sessionCode]);
+
   useEffect(() => {
     if (!mounted) return;
     if (!game) return;
+    if (!roundFinished) return;
+    if (resultSentRef.current) return;
 
-    if (roundFinished) setOpenRoundEnd(true);
-    if (!roundFinished) setOpenRoundEnd(false);
-  }, [roundFinished, mounted, game]);
+    resultSentRef.current = true;
 
-  const winners = useMemo(() => {
-    const list = (teams || []).map((t: Team) => ({
-      name: (t?.name || "").trim() || "فريق",
-      score: Number(t?.score || 0),
-      icon: t?.icon,
-    }));
-    if (!list.length) return { max: 0, winners: [] as typeof list };
+    const payload = {
+      ...resultData,
+      gameData: game,
+    };
 
-    const max = Math.max(...list.map((x: { score: number }) => x.score));
-    const w = list.filter((x: { score: number }) => x.score === max);
-    return { max, winners: w };
-  }, [teams]);
+    saveResult(payload);
+
+    if (sessionDocId) {
+      updateDoc(doc(db, "sessions", sessionDocId), {
+        status: "finished",
+        resultData: payload,
+      }).catch((e) => console.error(e));
+    }
+
+    const sessionPart = sessionCode ? `?session=${encodeURIComponent(sessionCode)}` : "";
+    router.replace(`/result${sessionPart}`);
+  }, [roundFinished, mounted, game, resultData, router, sessionCode, sessionDocId]);
 
   function openQuestion(catId: string, pts: number, idx: number) {
     const sessionPart = sessionCode ? `&session=${encodeURIComponent(sessionCode)}` : "";
@@ -354,29 +392,6 @@ export default function GameBoardClient() {
 
     const updated = { ...g, teams: updatedTeams };
     await persistGame(updated);
-  }
-
-  async function newRoundKeepScores() {
-    const g = loadGame() || {};
-    const updated = { ...g };
-    updated.used = {};
-    updated.seenQuestions = {};
-    updated.turnIndex = 0;
-
-    await persistGame(updated);
-    setOpenRoundEnd(false);
-  }
-
-  async function newRoundResetScores() {
-    const g = loadGame() || {};
-    const updated = { ...g };
-    updated.used = {};
-    updated.seenQuestions = {};
-    updated.turnIndex = 0;
-    updated.teams = (updated.teams || []).map((t: Team) => ({ ...t, score: 0 }));
-
-    await persistGame(updated);
-    setOpenRoundEnd(false);
   }
 
   const firstTeam = teams[0];
@@ -478,20 +493,10 @@ export default function GameBoardClient() {
                   {firstTeam ? (
                     <div className={`${styles.teamCard} ${0 === safeTurnIndex ? styles.teamActive : ""}`}>
                       <div className={styles.teamManualCol}>
-                        <button
-                          type="button"
-                          className={styles.scoreBtn}
-                          onClick={() => updateTeamScore(0, 100)}
-                          title="زيادة 100"
-                        >
+                        <button type="button" className={styles.scoreBtn} onClick={() => updateTeamScore(0, 100)} title="زيادة 100">
                           <Icon icon="mdi:plus" width={18} height={18} />
                         </button>
-                        <button
-                          type="button"
-                          className={styles.scoreBtn}
-                          onClick={() => updateTeamScore(0, -100)}
-                          title="خصم 100"
-                        >
+                        <button type="button" className={styles.scoreBtn} onClick={() => updateTeamScore(0, -100)} title="خصم 100">
                           <Icon icon="mdi:minus" width={18} height={18} />
                         </button>
                       </div>
@@ -538,20 +543,10 @@ export default function GameBoardClient() {
                       </div>
 
                       <div className={styles.teamManualCol}>
-                        <button
-                          type="button"
-                          className={styles.scoreBtn}
-                          onClick={() => updateTeamScore(1, 100)}
-                          title="زيادة 100"
-                        >
+                        <button type="button" className={styles.scoreBtn} onClick={() => updateTeamScore(1, 100)} title="زيادة 100">
                           <Icon icon="mdi:plus" width={18} height={18} />
                         </button>
-                        <button
-                          type="button"
-                          className={styles.scoreBtn}
-                          onClick={() => updateTeamScore(1, -100)}
-                          title="خصم 100"
-                        >
+                        <button type="button" className={styles.scoreBtn} onClick={() => updateTeamScore(1, -100)} title="خصم 100">
                           <Icon icon="mdi:minus" width={18} height={18} />
                         </button>
                       </div>
@@ -565,26 +560,17 @@ export default function GameBoardClient() {
                   <div className={styles.extraTeamsRow}>
                     {extraTeams.map((t, extraIdx) => {
                       const realIdx = extraIdx + 2;
+
                       return (
                         <div
                           key={realIdx}
                           className={`${styles.teamCard} ${realIdx === safeTurnIndex ? styles.teamActive : ""}`}
                         >
                           <div className={styles.teamManualCol}>
-                            <button
-                              type="button"
-                              className={styles.scoreBtn}
-                              onClick={() => updateTeamScore(realIdx, 100)}
-                              title="زيادة 100"
-                            >
+                            <button type="button" className={styles.scoreBtn} onClick={() => updateTeamScore(realIdx, 100)} title="زيادة 100">
                               <Icon icon="mdi:plus" width={18} height={18} />
                             </button>
-                            <button
-                              type="button"
-                              className={styles.scoreBtn}
-                              onClick={() => updateTeamScore(realIdx, -100)}
-                              title="خصم 100"
-                            >
+                            <button type="button" className={styles.scoreBtn} onClick={() => updateTeamScore(realIdx, -100)} title="خصم 100">
                               <Icon icon="mdi:minus" width={18} height={18} />
                             </button>
                           </div>
@@ -610,49 +596,6 @@ export default function GameBoardClient() {
                 )}
               </div>
             </main>
-
-            {openRoundEnd && (
-              <div className={styles.roundBackdrop} onClick={() => setOpenRoundEnd(false)}>
-                <div className={styles.roundCard} onClick={(e) => e.stopPropagation()}>
-                  <div className={styles.roundHeader}>
-                    <div className={styles.roundBadge}>🏆</div>
-                    <div>
-                      <div className={styles.roundTitle}>انتهت الجولة!</div>
-                      <div className={styles.roundSub}>
-                        {winners.winners.length > 1 ? "تعادل على المركز الأول" : "الفريق الفائز"}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className={styles.roundWinners}>
-                    {winners.winners.map((w, i) => (
-                      <div key={i} className={styles.winnerChip}>
-                        <span className={styles.winnerName}>{w.name}</span>
-                        <span className={styles.winnerScore}>{w.score}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className={styles.roundHint}>
-                    أعلى نتيجة: <b>{winners.max}</b> نقطة
-                  </div>
-
-                  <div className={styles.roundActions}>
-                    <button type="button" className={styles.roundBtnPrimary} onClick={newRoundKeepScores}>
-                      جولة جديدة (نفس النقاط)
-                    </button>
-
-                    <button type="button" className={styles.roundBtnSecondary} onClick={newRoundResetScores}>
-                      جولة جديدة (تصفير النقاط)
-                    </button>
-
-                    <button type="button" className={styles.roundBtnGhost} onClick={() => setOpenRoundEnd(false)}>
-                      إغلاق
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>

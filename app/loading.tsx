@@ -1,21 +1,26 @@
 // app/loading.tsx
-import Image from "next/image";
-import styles from "./loading.module.css";
 
 export default function Loading() {
   return (
-    <div className={styles.page}>
-      <div className={styles.center}>
-        <Image
-          src="/logo.png"
-          alt="logo"
-          width={140}
-          height={140}
-          priority
-        />
-
-        <div className={styles.text}>جاري التحميل...</div>
-      </div>
-    </div>
+    <main
+      style={{
+        minHeight: "100dvh",
+        width: "100%",
+        background: "#000",
+        display: "grid",
+        placeItems: "center",
+      }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/logo.png"
+        alt="مستوى"
+        style={{
+          width: "min(220px, 58vw)",
+          height: "auto",
+          objectFit: "contain",
+        }}
+      />
+    </main>
   );
 }

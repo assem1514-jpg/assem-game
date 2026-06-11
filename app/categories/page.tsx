@@ -391,7 +391,10 @@ export default function CategoriesPage() {
                       role="button"
                       tabIndex={0}
                     >
-                      <div className={styles.gamesLeft}>{gamesLeft[cat.id] ?? 0}</div>
+                      <div className={styles.gamesLeft}>
+                        <span className={styles.gamesLeftLabel}>متبقي</span>
+                        <span className={styles.gamesLeftNumber}>{gamesLeft[cat.id] ?? 0}</span>
+                      </div>
 
                       <button
                         type="button"

@@ -345,7 +345,7 @@
   .headerLogo{
     width: clamp(130px, 34vw, 170px);
   }
-
+ 
   .cardBadge{
     min-width: 160px;
     font-size: 18px;

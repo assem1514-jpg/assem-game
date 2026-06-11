@@ -15,8 +15,8 @@ type PlayerDoc = {
   name: string;
   email: string;
   photoURL?: string;
-  keys: number;        // رصيد المفاتيح
-  gamesPlayed: number; // عدد مرات اللعب
+  keys: number;
+  gamesPlayed: number;
   createdAt?: any;
   lastLoginAt?: any;
 };
@@ -30,9 +30,10 @@ export default function ProfilePage() {
 
   const colors = useMemo(
     () => ({
-      navy: "var(--navy, #0D3B66)",
-      cream: "var(--cream, #FAF0CA)",
-      yellow: "var(--yellow, #F4D35E)",
+      navy: "#0D3B66",
+      cream: "#FAF0CA",
+      yellow: "#F4D35E",
+      danger: "#ff4d6d",
     }),
     []
   );
@@ -40,24 +41,23 @@ export default function ProfilePage() {
   useEffect(() => {
     if (loading) return;
 
-    // لو ما فيه مستخدم -> رجعه لتسجيل الدخول
     if (!user) {
       router.replace("/login");
       return;
     }
 
-    const uid = user.uid; // ✅ نثبت uid هنا عشان ما يطلع خطأ
+    const uid = user.uid;
     const fallbackName = (user.displayName || "").trim() || "لاعب";
     const fallbackEmail = (user.email || "").trim();
 
     (async () => {
       setBusy(true);
+
       try {
         const ref = doc(db, "players", uid);
         const snap = await getDoc(ref);
 
         if (!snap.exists()) {
-          // ✅ إنشاء وثيقة جديدة لو ما كانت موجودة
           const payload: PlayerDoc = {
             uid,
             name: fallbackName,
@@ -68,6 +68,7 @@ export default function ProfilePage() {
             createdAt: serverTimestamp(),
             lastLoginAt: serverTimestamp(),
           };
+
           await setDoc(ref, payload, { merge: true });
           setData(payload);
         } else {
@@ -84,7 +85,6 @@ export default function ProfilePage() {
             lastLoginAt: d.lastLoginAt,
           };
 
-          // ✅ مزامنة أي قيم ناقصة
           await setDoc(
             ref,
             {
@@ -109,214 +109,447 @@ export default function ProfilePage() {
     })();
   }, [loading, user, router]);
 
-  const handleLogout = async () => {
+  async function handleLogout() {
     await signOut(auth);
     router.replace("/");
-  };
+  }
 
   if (loading || busy) {
     return (
-      <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", background: colors.navy, color: "white" }}>
+      <main
+        style={{
+          minHeight: "100dvh",
+          display: "grid",
+          placeItems: "center",
+          background: colors.navy,
+          color: colors.cream,
+          fontWeight: 900,
+          direction: "rtl",
+        }}
+      >
         جاري تحميل البروفايل...
-      </div>
+      </main>
     );
   }
 
   if (!data) {
     return (
-      <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: 24 }}>
-        <div style={{ maxWidth: 520, width: "100%", background: "white", borderRadius: 18, padding: 18 }}>
+      <main
+        style={{
+          minHeight: "100dvh",
+          display: "grid",
+          placeItems: "center",
+          padding: 18,
+          background: colors.cream,
+          direction: "rtl",
+        }}
+      >
+        <section
+          style={{
+            width: "100%",
+            maxWidth: 430,
+            background: "#fff",
+            borderRadius: 24,
+            padding: 20,
+            boxShadow: "0 18px 50px rgba(13,59,102,.14)",
+            color: colors.navy,
+            textAlign: "center",
+            fontWeight: 900,
+          }}
+        >
           صار خطأ بقراءة بيانات البروفايل.
-          <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+
+          <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
             <button
               onClick={() => router.refresh()}
-              style={{ padding: "12px 14px", borderRadius: 12, border: "none", background: colors.yellow, fontWeight: 900 }}
+              style={{
+                minHeight: 52,
+                borderRadius: 16,
+                border: "none",
+                background: colors.yellow,
+                color: colors.navy,
+                fontWeight: 1000,
+                cursor: "pointer",
+              }}
             >
               إعادة المحاولة
             </button>
+
             <Link
               href="/"
-              style={{ padding: "12px 14px", borderRadius: 12, border: `2px solid ${colors.navy}`, fontWeight: 900, color: colors.navy }}
+              style={{
+                minHeight: 52,
+                borderRadius: 16,
+                border: `2px solid ${colors.navy}`,
+                color: colors.navy,
+                fontWeight: 1000,
+                textDecoration: "none",
+                display: "grid",
+                placeItems: "center",
+              }}
             >
               الرجوع للرئيسية
             </Link>
           </div>
-        </div>
-      </div>
+        </section>
+      </main>
     );
   }
 
   const avatar = data.photoURL?.trim() ? data.photoURL : "";
 
   return (
-    <div
+    <main
       style={{
         minHeight: "100dvh",
-        background: `linear-gradient(135deg, ${colors.navy}, #093055)`,
-        padding: 18,
-        display: "grid",
-        placeItems: "center",
+        width: "100%",
+        background: `linear-gradient(180deg, ${colors.navy} 0%, #082944 100%)`,
+        padding: "22px 16px",
+        boxSizing: "border-box",
+        direction: "rtl",
       }}
     >
-      <div
+      <section
         style={{
-          width: "min(880px, 100%)",
-          background: "rgba(255,255,255,.10)",
-          border: "1px solid rgba(255,255,255,.18)",
-          borderRadius: 22,
-          padding: 16,
-          backdropFilter: "blur(10px)",
+          width: "100%",
+          maxWidth: 430,
+          margin: "0 auto",
+          display: "grid",
+          gap: 14,
         }}
       >
-        {/* Top */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 240 }}>
+        {/* بطاقة المستخدم */}
+        <div
+          style={{
+            background: colors.cream,
+            borderRadius: 30,
+            padding: 20,
+            boxShadow: "0 24px 70px rgba(0,0,0,.28)",
+            border: "1px solid rgba(255,255,255,.22)",
+            textAlign: "center",
+          }}
+        >
+          <div
+            style={{
+              width: 96,
+              height: 96,
+              borderRadius: 30,
+              background: colors.navy,
+              margin: "0 auto 14px",
+              display: "grid",
+              placeItems: "center",
+              overflow: "hidden",
+              boxShadow: "0 16px 36px rgba(13,59,102,.28)",
+              border: `4px solid ${colors.yellow}`,
+            }}
+          >
+            {avatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={avatar}
+                alt="avatar"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                }}
+              />
+            ) : (
+              <span
+                style={{
+                  fontSize: 36,
+                  fontWeight: 1000,
+                  color: colors.yellow,
+                }}
+              >
+                {data.name?.trim()?.[0] || "م"}
+              </span>
+            )}
+          </div>
+
+          <h1
+            style={{
+              margin: 0,
+              color: colors.navy,
+              fontSize: 30,
+              fontWeight: 1000,
+              lineHeight: 1.2,
+            }}
+          >
+            {data.name}
+          </h1>
+
+          <div
+            style={{
+              marginTop: 8,
+              color: "rgba(13,59,102,.72)",
+              fontSize: 14,
+              fontWeight: 800,
+              direction: "ltr",
+              textAlign: "center",
+              wordBreak: "break-word",
+            }}
+          >
+            {data.email}
+          </div>
+        </div>
+
+        {/* الإحصائيات */}
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 26,
+            padding: 18,
+            boxShadow: "0 16px 46px rgba(0,0,0,.18)",
+          }}
+        >
+          <h2
+            style={{
+              margin: "0 0 14px",
+              color: colors.navy,
+              fontSize: 22,
+              fontWeight: 1000,
+            }}
+          >
+            إحصائياتك
+          </h2>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div
               style={{
-                width: 62,
-                height: 62,
+                borderRadius: 20,
+                padding: 14,
+                background: "rgba(13,59,102,.06)",
+                border: "2px solid rgba(13,59,102,.10)",
+                textAlign: "center",
+              }}
+            >
+              <div
+                style={{
+                  color: colors.navy,
+                  fontWeight: 1000,
+                  fontSize: 14,
+                  lineHeight: 1.4,
+                }}
+              >
+                عدد مرات اللعب
+              </div>
+
+              <div
+                style={{
+                  fontSize: 34,
+                  fontWeight: 1000,
+                  color: colors.navy,
+                  marginTop: 6,
+                }}
+              >
+                {data.gamesPlayed}
+              </div>
+            </div>
+
+            <div
+              style={{
+                borderRadius: 20,
+                padding: 14,
+                background: "rgba(244,211,94,.38)",
+                border: "2px solid rgba(13,59,102,.10)",
+                textAlign: "center",
+              }}
+            >
+              <div
+                style={{
+                  color: colors.navy,
+                  fontWeight: 1000,
+                  fontSize: 14,
+                  lineHeight: 1.4,
+                }}
+              >
+                رصيد المفاتيح
+              </div>
+
+              <div
+                style={{
+                  fontSize: 34,
+                  fontWeight: 1000,
+                  color: colors.navy,
+                  marginTop: 6,
+                }}
+              >
+                {data.keys}
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: 12,
+              fontSize: 12,
+              color: "rgba(13,59,102,.62)",
+              fontWeight: 800,
+              lineHeight: 1.7,
+            }}
+          >
+            * المفاتيح حالياً رصيد فقط، وبعدين نربطها بالشراء أو الدفع.
+          </div>
+        </div>
+
+        {/* الحساب */}
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 26,
+            padding: 18,
+            boxShadow: "0 16px 46px rgba(0,0,0,.18)",
+          }}
+        >
+          <h2
+            style={{
+              margin: "0 0 14px",
+              color: colors.navy,
+              fontSize: 22,
+              fontWeight: 1000,
+            }}
+          >
+            الحساب
+          </h2>
+
+          <div style={{ display: "grid", gap: 10 }}>
+            <div
+              style={{
+                padding: 14,
                 borderRadius: 18,
-                background: "rgba(250,240,202,.20)",
-                border: "2px solid rgba(250,240,202,.25)",
-                display: "grid",
-                placeItems: "center",
-                overflow: "hidden",
-                flex: "0 0 auto",
+                border: "2px solid rgba(13,59,102,.10)",
+                background: "rgba(13,59,102,.04)",
               }}
             >
-              {avatar ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={avatar} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              ) : (
-                <span style={{ fontSize: 22, fontWeight: 900, color: colors.cream }}>
-                  {data.name?.trim()?.[0] || "م"}
-                </span>
-              )}
-            </div>
-
-            <div style={{ color: "white" }}>
-              <div style={{ fontWeight: 900, fontSize: 20, lineHeight: 1.2 }}>{data.name}</div>
-              <div style={{ opacity: 0.85, marginTop: 4, direction: "ltr", textAlign: "right" }}>{data.email}</div>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Link
-              href="/"
-              style={{
-                padding: "10px 14px",
-                borderRadius: 14,
-                border: "1px solid rgba(250,240,202,.35)",
-                color: "white",
-                textDecoration: "none",
-                fontWeight: 900,
-                background: "rgba(250,240,202,.10)",
-              }}
-            >
-              الرجوع للرئيسية
-            </Link>
-
-            <Link
-              href="/categories"
-              style={{
-                padding: "10px 14px",
-                borderRadius: 14,
-                border: "none",
-                color: "#111",
-                textDecoration: "none",
-                fontWeight: 900,
-                background: colors.yellow,
-              }}
-            >
-              ابدأ لعبة
-            </Link>
-          </div>
-        </div>
-
-        {/* Stats */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 12, marginTop: 14 }}>
-          <div
-            style={{
-              gridColumn: "span 6",
-              background: "white",
-              borderRadius: 18,
-              padding: 14,
-              border: "2px solid rgba(13,59,102,.10)",
-            }}
-          >
-            <div style={{ fontWeight: 900, color: colors.navy, marginBottom: 10 }}>إحصائياتك</div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
               <div
                 style={{
-                  borderRadius: 16,
-                  padding: 12,
-                  background: "rgba(13,59,102,.04)",
-                  border: "2px solid rgba(13,59,102,.10)",
+                  fontWeight: 1000,
+                  color: colors.navy,
+                  marginBottom: 6,
+                  fontSize: 14,
                 }}
               >
-                <div style={{ color: colors.navy, fontWeight: 900 }}>عدد مرات اللعب</div>
-                <div style={{ fontSize: 26, fontWeight: 900, color: colors.navy, marginTop: 6 }}>{data.gamesPlayed}</div>
+                اسم الحساب
+              </div>
+
+              <div style={{ fontWeight: 900, color: "#111" }}>{data.name}</div>
+            </div>
+
+            <div
+              style={{
+                padding: 14,
+                borderRadius: 18,
+                border: "2px solid rgba(13,59,102,.10)",
+                background: "rgba(13,59,102,.04)",
+              }}
+            >
+              <div
+                style={{
+                  fontWeight: 1000,
+                  color: colors.navy,
+                  marginBottom: 6,
+                  fontSize: 14,
+                }}
+              >
+                البريد الإلكتروني
               </div>
 
               <div
                 style={{
-                  borderRadius: 16,
-                  padding: 12,
-                  background: "rgba(244,211,94,.25)",
-                  border: "2px solid rgba(13,59,102,.10)",
-                }}
-              >
-                <div style={{ color: colors.navy, fontWeight: 900 }}>رصيد المفاتيح</div>
-                <div style={{ fontSize: 26, fontWeight: 900, color: colors.navy, marginTop: 6 }}>{data.keys}</div>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75, color: colors.navy }}>
-              * المفاتيح حالياً رصيد فقط، وبعدين نربطها بالشراء/الدفع.
-            </div>
-          </div>
-
-          <div
-            style={{
-              gridColumn: "span 6",
-              background: "white",
-              borderRadius: 18,
-              padding: 14,
-              border: "2px solid rgba(13,59,102,.10)",
-            }}
-          >
-            <div style={{ fontWeight: 900, color: colors.navy, marginBottom: 10 }}>الحساب</div>
-
-            <div style={{ display: "grid", gap: 10 }}>
-              <div style={{ padding: 12, borderRadius: 16, border: "2px solid rgba(13,59,102,.10)", background: "rgba(13,59,102,.04)" }}>
-                <div style={{ fontWeight: 900, color: colors.navy, marginBottom: 6 }}>اسم الحساب</div>
-                <div style={{ fontWeight: 800 }}>{data.name}</div>
-              </div>
-
-              <div style={{ padding: 12, borderRadius: 16, border: "2px solid rgba(13,59,102,.10)", background: "rgba(13,59,102,.04)" }}>
-                <div style={{ fontWeight: 900, color: colors.navy, marginBottom: 6 }}>البريد الإلكتروني</div>
-                <div style={{ fontWeight: 800, direction: "ltr", textAlign: "right" }}>{data.email}</div>
-              </div>
-
-              <button
-                onClick={handleLogout}
-                style={{
-                  height: 48,
-                  borderRadius: 16,
-                  border: "none",
-                  background: "#ff4d6d",
-                  color: "white",
                   fontWeight: 900,
-                  cursor: "pointer",
+                  color: "#111",
+                  direction: "ltr",
+                  textAlign: "right",
+                  wordBreak: "break-word",
                 }}
               >
-                تسجيل خروج
-              </button>
+                {data.email}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
+
+        {/* أزرار */}
+        <div
+          style={{
+            display: "grid",
+            gap: 10,
+            background: "rgba(250,240,202,.10)",
+            border: "1px solid rgba(250,240,202,.18)",
+            borderRadius: 26,
+            padding: 12,
+            backdropFilter: "blur(10px)",
+          }}
+        >
+          <Link
+            href="/categories"
+            style={{
+              minHeight: 56,
+              borderRadius: 18,
+              background: colors.yellow,
+              color: colors.navy,
+              fontWeight: 1000,
+              fontSize: 16,
+              textDecoration: "none",
+              display: "grid",
+              placeItems: "center",
+            }}
+          >
+            ابدأ لعبة
+          </Link>
+
+          <Link
+            href="/"
+            style={{
+              minHeight: 54,
+              borderRadius: 18,
+              background: colors.cream,
+              color: colors.navy,
+              fontWeight: 1000,
+              fontSize: 16,
+              textDecoration: "none",
+              display: "grid",
+              placeItems: "center",
+            }}
+          >
+            الرجوع للرئيسية
+          </Link>
+
+          <Link
+            href="/privacy"
+            style={{
+              minHeight: 50,
+              borderRadius: 18,
+              border: "1px solid rgba(250,240,202,.28)",
+              color: colors.cream,
+              fontWeight: 900,
+              fontSize: 14,
+              textDecoration: "underline",
+              display: "grid",
+              placeItems: "center",
+            }}
+          >
+            سياسة الخصوصية
+          </Link>
+
+          <button
+            onClick={handleLogout}
+            style={{
+              minHeight: 54,
+              borderRadius: 18,
+              border: "none",
+              background: colors.danger,
+              color: "#fff",
+              fontWeight: 1000,
+              fontSize: 16,
+              cursor: "pointer",
+            }}
+          >
+            تسجيل خروج
+          </button>
+        </div>
+      </section>
+    </main>
   );
 }
