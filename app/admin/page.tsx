@@ -16,7 +16,8 @@ import {
   setDoc,
   updateDoc,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
+import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 
 import SectionsTab from "./SectionsTab";
 import CategoriesTab from "./CategoriesTab";
@@ -64,11 +65,45 @@ type PromoCode = {
   updatedAt?: any;
 };
 
+const ADMIN_EMAIL = "assem1514@gmail.com";
+
 export default function AdminPage() {
   const router = useRouter();
 
-  const [activePackId, setActivePackId] = useState<string>("main");
+  const [authChecking, setAuthChecking] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+
   useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        setCurrentUser(null);
+        setIsAdmin(false);
+        setAuthChecking(false);
+        router.replace("/admin/login");
+        return;
+      }
+
+      const email = (user.email || "").toLowerCase().trim();
+
+      setCurrentUser(user);
+      setIsAdmin(email === ADMIN_EMAIL);
+      setAuthChecking(false);
+    });
+
+    return () => unsub();
+  }, [router]);
+
+  async function handleAdminLogout() {
+    await signOut(auth);
+    router.replace("/admin/login");
+  }
+
+  const [activePackId, setActivePackId] = useState<string>("main");
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
     const cfgRef = doc(db, "appConfig", "main");
     const unsub = onSnapshot(
       cfgRef,
@@ -81,8 +116,9 @@ export default function AdminPage() {
         setActivePackId("main");
       }
     );
+
     return () => unsub();
-  }, []);
+  }, [isAdmin]);
 
   const [tab, setTab] = useState<AdminTab>("sections");
 
@@ -94,6 +130,8 @@ export default function AdminPage() {
   const [chargeMap, setChargeMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
+    if (!isAdmin) return;
+
     const colRef = collection(db, "users");
     const qUsers = query(colRef);
 
@@ -128,7 +166,7 @@ export default function AdminPage() {
     );
 
     return () => unsub();
-  }, []);
+  }, [isAdmin]);
 
   async function chargeUser(uid: string) {
     const amount = Number(chargeMap[uid] ?? 0);
@@ -158,6 +196,8 @@ export default function AdminPage() {
   const [promoMaxUses, setPromoMaxUses] = useState<number>(100);
 
   useEffect(() => {
+    if (!isAdmin) return;
+
     const colRef = collection(db, "promoCodes");
     const qPromo = query(colRef);
 
@@ -192,7 +232,7 @@ export default function AdminPage() {
     );
 
     return () => unsub();
-  }, []);
+  }, [isAdmin]);
 
   async function createPromo() {
     const code = promoCode.trim().toUpperCase();
@@ -233,12 +273,98 @@ export default function AdminPage() {
   async function deletePromo(p: PromoCode) {
     const ok = confirm(`حذف كود ${p.code} ؟`);
     if (!ok) return;
+
     try {
       await deleteDoc(doc(db, "promoCodes", p.id));
     } catch (e) {
       console.error(e);
       alert("فشل حذف الكود");
     }
+  }
+
+  if (authChecking) {
+    return (
+      <main
+        style={{
+          minHeight: "100dvh",
+          display: "grid",
+          placeItems: "center",
+          background: "#FAF0CA",
+          color: "#0D3B66",
+          direction: "rtl",
+          fontWeight: 1000,
+          padding: 20,
+        }}
+      >
+        جاري التحقق من صلاحية الدخول...
+      </main>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <main
+        style={{
+          minHeight: "100dvh",
+          display: "grid",
+          placeItems: "center",
+          background: "#FAF0CA",
+          color: "#0D3B66",
+          direction: "rtl",
+          padding: 20,
+        }}
+      >
+        <div
+          style={{
+            width: "min(520px, 92vw)",
+            background: "#fff",
+            borderRadius: 24,
+            padding: 24,
+            boxShadow: "0 18px 50px rgba(13,59,102,.16)",
+            textAlign: "center",
+          }}
+        >
+          <h1 style={{ margin: 0, fontSize: 30, fontWeight: 1000 }}>
+            غير مصرح
+          </h1>
+
+          <p style={{ fontWeight: 800, opacity: 0.75 }}>
+            هذا الحساب لا يملك صلاحية دخول لوحة الأدمن.
+          </p>
+
+          <p
+            style={{
+              direction: "ltr",
+              fontWeight: 900,
+              background: "rgba(13,59,102,.06)",
+              padding: 12,
+              borderRadius: 14,
+              wordBreak: "break-word",
+            }}
+          >
+            {currentUser?.email || "No email"}
+          </p>
+
+          <button
+            type="button"
+            onClick={handleAdminLogout}
+            style={{
+              marginTop: 12,
+              width: "100%",
+              minHeight: 54,
+              borderRadius: 16,
+              border: "none",
+              background: "#0D3B66",
+              color: "#FAF0CA",
+              fontWeight: 1000,
+              cursor: "pointer",
+            }}
+          >
+            تسجيل الخروج
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -314,8 +440,19 @@ export default function AdminPage() {
         <div className={styles.sidebarFooter}>
           <div className={styles.meLine}>
             <span className={styles.dot} />
-            <span className={styles.meEmail}>ضيف</span>
+            <span className={styles.meEmail}>
+              {currentUser?.email || "أدمن"}
+            </span>
           </div>
+
+          <button
+            type="button"
+            className={styles.ghostBtn}
+            style={{ marginTop: 10, width: "100%" }}
+            onClick={handleAdminLogout}
+          >
+            تسجيل خروج
+          </button>
         </div>
       </aside>
 
