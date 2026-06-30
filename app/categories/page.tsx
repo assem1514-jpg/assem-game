@@ -129,7 +129,6 @@ export default function CategoriesPage() {
   const [generatedWebUrl, setGeneratedWebUrl] = useState("");
 
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const wasReadyRef = useRef(false);
 
   useEffect(() => {
     const qRef = query(
@@ -240,17 +239,7 @@ export default function CategoriesPage() {
     return selected.map((id) => map.get(id)).filter(Boolean) as Category[];
   }, [selected, categories]);
 
-  const canStart = selected.length === 6;
-
-  useEffect(() => {
-    if (canStart && !wasReadyRef.current) {
-      setTeamModalOpen(true);
-    }
-    if (!canStart) {
-      setTeamModalOpen(false);
-    }
-    wasReadyRef.current = canStart;
-  }, [canStart]);
+  const canStart = selected.length >= 3;
 
   function buildGamePayload() {
     const cleanedTeams = teams
@@ -296,7 +285,7 @@ export default function CategoriesPage() {
       });
 
       setGeneratedWebCode(sessionCode);
-      setGeneratedWebUrl(`${origin}/play`);
+      setGeneratedWebUrl(`${origin}/`);
       setTeamModalOpen(false);
       setWebCodeModalOpen(true);
     } catch (error) {
@@ -338,7 +327,7 @@ export default function CategoriesPage() {
 
       <div className={styles.wrapper}>
         <div className={styles.hero}>
-          <Link href="/" className={styles.homeBtn}>
+          <Link href="/home" className={styles.homeBtn}>
             <Icon icon="mdi:home" width={18} height={18} />
             العودة للرئيسية
           </Link>
@@ -409,7 +398,6 @@ export default function CategoriesPage() {
                       </button>
 
                       {img ? (
-                        // eslint-disable-next-line @next/next/no-img-element
                         <img src={img} className={styles.image} alt={cat.name} />
                       ) : (
                         <div className={styles.image} />
@@ -424,6 +412,17 @@ export default function CategoriesPage() {
           );
         })}
       </div>
+
+      {canStart && (
+        <button
+          type="button"
+          className={styles.nextFloatingBtn}
+          onClick={() => setTeamModalOpen(true)}
+        >
+          التالي ({selected.length})
+          <Icon icon="mdi:chevron-left" width={20} height={20} />
+        </button>
+      )}
 
       {modalText && (
         <div className={styles.modal} onClick={() => setModalText(null)}>

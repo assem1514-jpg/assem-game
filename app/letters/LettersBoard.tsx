@@ -15,12 +15,13 @@ type Cell = {
 type Props = {
   onPickLetter?: (letter: string) => void;
   disabled?: boolean;
+  onResetGame?: () => void;
 };
 
 type Step = 0 | 1 | 2 | 3;
 type Winner = "green" | "red" | null;
 
-export default function LettersBoard({ onPickLetter, disabled }: Props) {
+export default function LettersBoard({ onPickLetter, disabled, onResetGame }: Props) {
   const cells = useMemo<Cell[]>(
     () => [
       { kind: "black" },
@@ -56,7 +57,7 @@ export default function LettersBoard({ onPickLetter, disabled }: Props) {
       { kind: "green" },
 
       { kind: "green" },
-      { id: "hex16", kind: "letter", letter: "أ" },
+      { id: "hex16", kind: "letter", letter: "ا" },
       { id: "hex17", kind: "letter", letter: "ل" },
       { id: "hex18", kind: "letter", letter: "ي" },
       { id: "hex19", kind: "letter", letter: "س" },
@@ -141,7 +142,6 @@ export default function LettersBoard({ onPickLetter, disabled }: Props) {
       return false;
     };
 
-    // ✅ فوز الأخضر: يسار -> يمين
     const greenStarts: number[] = [];
     const greenTargets = new Set<number>();
     for (let r = 1; r <= 5; r++) {
@@ -177,7 +177,6 @@ export default function LettersBoard({ onPickLetter, disabled }: Props) {
 
     const greenWon = bfs("green", greenStarts, greenTargets);
 
-    // ✅ فوز الأحمر: أعلى -> أسفل
     const redStarts: number[] = [];
     const redTargets = new Set<number>();
     for (let c = 1; c <= 6; c++) {
@@ -199,7 +198,6 @@ export default function LettersBoard({ onPickLetter, disabled }: Props) {
     if (!selectedId) return;
 
     setPaintById((prev) => {
-      // ✅ أهم تعديل: تثبيت النوع عشان ما يصير string
       const next: Record<string, Paint> = { ...prev, [selectedId]: color };
       const w = checkWin(next);
       if (w) setWinner(w);
@@ -215,7 +213,6 @@ export default function LettersBoard({ onPickLetter, disabled }: Props) {
     if (!selectedId) return;
 
     setPaintById((prev) => {
-      // ✅ أهم تعديل هنا بعد: "none" يتثبت كـ Paint
       const next: Record<string, Paint> = { ...prev, [selectedId]: "none" };
       return next;
     });
@@ -230,6 +227,7 @@ export default function LettersBoard({ onPickLetter, disabled }: Props) {
     setPaintById({});
     setClearedLetter({});
     setWinner(null);
+    onResetGame?.();
   }
 
   function onCellClick(cell: Cell) {

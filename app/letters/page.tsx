@@ -29,7 +29,8 @@ function normalizeLetter(raw: string) {
     .trim()
     .normalize("NFC")
     .replace(/\u0640/g, "")
-    .replace("هـ", "ه");
+    .replace("هـ", "ه")
+    .replace(/[أإآٱ]/g, "ا");
 }
 
 function generate4CharCode() {
@@ -118,6 +119,59 @@ export default function Page() {
     } catch (e) {
       console.error(e);
     }
+  }
+
+  function resetLettersGameState() {
+    if (intervalRef.current) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    setPhase("idle");
+    setPickedLetter("");
+    setSeconds(0);
+    setQuestionText("هنا يظهر السؤال…");
+    setAnswerText("");
+    setShowAnswer(false);
+    setUsedQuestionIdsByLetter({});
+  }
+
+  async function handleResetGame() {
+    resetLettersGameState();
+
+    await persistLettersState({
+      phase: "idle",
+      pickedLetter: "",
+      seconds: 0,
+      questionText: "هنا يظهر السؤال…",
+      answerText: "",
+      showAnswer: false,
+      usedQuestionIdsByLetter: {},
+    });
+  }
+
+  function handleExit() {
+    if (sessionCode) {
+      router.push("/");
+      return;
+    }
+    router.push("/home");
+  }
+
+  function handleBack() {
+    if (intervalRef.current) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    setGameStarted(false);
+    setPhase("idle");
+    setPickedLetter("");
+    setSeconds(0);
+    setQuestionText("هنا يظهر السؤال…");
+    setAnswerText("");
+    setShowAnswer(false);
+    setUsedQuestionIdsByLetter({});
   }
 
   useEffect(() => {
@@ -252,13 +306,7 @@ export default function Page() {
     setGreenTeam("الفريق الأخضر");
     setRedTeam("الفريق الأحمر");
     setGameStarted(true);
-    setPhase("idle");
-    setPickedLetter("");
-    setSeconds(0);
-    setQuestionText("هنا يظهر السؤال…");
-    setAnswerText("");
-    setShowAnswer(false);
-    setUsedQuestionIdsByLetter({});
+    resetLettersGameState();
   }
 
   async function startWebGame() {
@@ -294,7 +342,7 @@ export default function Page() {
       });
 
       setGeneratedWebCode(sessionCodeValue);
-      setGeneratedWebUrl(`${origin}/play`);
+      setGeneratedWebUrl(`${origin}/`);
       setWebCodeModalOpen(true);
     } catch (error) {
       console.error(error);
@@ -443,17 +491,17 @@ export default function Page() {
         >
           <div className={styles.stage}>
             <header className={styles.topBar}>
-              <button className={styles.topBtn} onClick={() => router.back()}>
+              <button
+                className={`${styles.topBtn} ${styles.primaryBtn}`}
+                onClick={handleBack}
+              >
                 رجوع
               </button>
 
               <div className={styles.topTitle}>خلية الحروف</div>
 
-              <button
-                className={`${styles.topBtn} ${styles.primaryBtn}`}
-                onClick={() => window.location.reload()}
-              >
-                لعبة جديدة
+              <button className={styles.topBtn} onClick={handleExit}>
+                خروج
               </button>
             </header>
 
@@ -484,7 +532,10 @@ export default function Page() {
               <div className={styles.main}>
                 <section className={styles.leftBoard}>
                   <div className={styles.leftInner}>
-                    <LettersBoard onPickLetter={(letter) => startCountdown(letter)} />
+                    <LettersBoard
+                      onPickLetter={(letter) => startCountdown(letter)}
+                      onResetGame={handleResetGame}
+                    />
                   </div>
                 </section>
 

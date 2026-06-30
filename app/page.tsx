@@ -1,4 +1,3 @@
-// app/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -406,7 +405,7 @@ export default function HomePage() {
               textAlign: "center",
             }}
           >
-            ملاحظة: إنشاء اللعبة وإدارة الأسئلة تكون من تطبيق مستوى فقط.
+            ملاحظة: إنشاء اللعبة تكون عبر تطبيق مستوى 
           </div>
 
           <footer

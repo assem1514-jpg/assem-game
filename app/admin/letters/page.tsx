@@ -18,7 +18,8 @@ function normalizeLetter(raw: string) {
     .trim()
     .normalize("NFC")
     .replace(/\u0640/g, "")
-    .replace("هـ", "ه");
+    .replace("هـ", "ه")
+    .replace(/[أإآٱ]/g, "ا");
 }
 
 type Item = {

@@ -415,7 +415,7 @@ export default function GameBoardClient() {
           <div className={styles.stage}>
             <header className={styles.topBar}>
               <div className={styles.leftBtns}>
-                <Link className={styles.smallBtn} href="/categories">
+                <Link className={styles.smallBtn} href={sessionCode ? "/" : "/categories"}>
                   <Icon icon="mdi:logout" width={18} height={18} />
                   الخروج
                 </Link>

@@ -6,7 +6,7 @@ const config: CapacitorConfig = {
   webDir: 'out',
 
   server: {
-    url: 'http://192.168.110.53:3000',
+    url: 'http://192.168.110.53:3000/home',
     cleartext: true
   }
 };
